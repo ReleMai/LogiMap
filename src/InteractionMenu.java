@@ -16,7 +16,7 @@ import javafx.scene.text.FontWeight;
 
 /**
  * Right-side interaction menu with tabbed organization.
- * Provides controls for building, transport, viewing, and analysis.
+ * Provides controls for map, character, and settings.
  */
 public class InteractionMenu {
     
@@ -28,10 +28,12 @@ public class InteractionMenu {
     
     // Tab content panels
     private VBox mapPanel;
-    private VBox buildPanel;
-    private VBox logisticsPanel;
-    private VBox economyPanel;
+    private VBox characterPanel;
     private VBox settingsPanel;
+    
+    // Wallet display
+    private Label walletLabel;
+    private Currency playerCurrency;
     
     // Control handlers
     private Runnable onStandardFilter;
@@ -42,6 +44,14 @@ public class InteractionMenu {
     private Runnable onSaveWorld;
     private Runnable onLoadWorld;
     private Runnable onMainMenu;
+    
+    // Character handlers
+    private Runnable onOpenCharacterSheet;
+    private Runnable onOpenGearSheet;
+    private Runnable onOpenInventory;
+    private Runnable onOpenRelationships;
+    private Runnable onOpenSkills;
+    private Runnable onOpenJournal;
     
     // Style constants - Medieval theme
     private static final String DARK_BG = "#1f1a10";
@@ -60,17 +70,25 @@ public class InteractionMenu {
         );
         
         tabGroup = new ToggleGroup();
-        tabBar = createTabBar();
         contentArea = new VBox();
         VBox.setVgrow(contentArea, Priority.ALWAYS);
         
+        // Create panels FIRST before creating tab bar
         createTabPanels();
+        
+        // Now create tab bar (panels exist now)
+        tabBar = createTabBar();
         
         container.getChildren().addAll(tabBar, contentArea);
         
         // Show Map tab by default
         showPanel(mapPanel);
     }
+    
+    // Tab button references for updating panels
+    private ToggleButton mapTab;
+    private ToggleButton characterTab;
+    private ToggleButton settingsTab;
     
     /**
      * Creates the tab bar with toggle buttons using icons.
@@ -81,16 +99,14 @@ public class InteractionMenu {
         bar.setAlignment(Pos.CENTER);
         bar.setStyle("-fx-background-color: " + DARK_BG + ";");
         
-        // Using emoji/unicode icons for tabs
-        ToggleButton mapTab = createTab("🗺", "Map", mapPanel);           // Map icon
-        ToggleButton buildTab = createTab("🏗", "Build", buildPanel);      // Construction icon
-        ToggleButton logisticsTab = createTab("🚚", "Logistics", logisticsPanel); // Truck icon
-        ToggleButton economyTab = createTab("📊", "Economy", economyPanel);  // Chart icon
-        ToggleButton settingsTab = createTab("⚙", "Settings", settingsPanel); // Gear icon
+        // Create tabs with proper panel references (panels exist now)
+        mapTab = createTab("🗺", "Map", mapPanel);
+        characterTab = createTab("👤", "Character", characterPanel);
+        settingsTab = createTab("⚙", "Settings", settingsPanel);
         
         mapTab.setSelected(true);
         
-        bar.getChildren().addAll(mapTab, buildTab, logisticsTab, economyTab, settingsTab);
+        bar.getChildren().addAll(mapTab, characterTab, settingsTab);
         return bar;
     }
     
@@ -162,9 +178,7 @@ public class InteractionMenu {
      */
     private void createTabPanels() {
         mapPanel = createMapPanel();
-        buildPanel = createBuildPanel();
-        logisticsPanel = createLogisticsPanel();
-        economyPanel = createEconomyPanel();
+        characterPanel = createCharacterPanel();
         settingsPanel = createSettingsPanel();
     }
     
@@ -191,6 +205,28 @@ public class InteractionMenu {
         VBox panel = new VBox(5);
         panel.setPadding(new Insets(10));
         panel.setStyle("-fx-background-color: " + MEDIUM_BG + ";");
+        
+        // Wallet Display
+        panel.getChildren().add(createSectionLabel("💰 WALLET"));
+        
+        VBox walletBox = new VBox(3);
+        walletBox.setPadding(new Insets(8));
+        walletBox.setStyle(
+            "-fx-background-color: " + DARK_BG + ";" +
+            "-fx-background-radius: 5;" +
+            "-fx-border-color: #5a4a30;" +
+            "-fx-border-radius: 5;" +
+            "-fx-border-width: 1;"
+        );
+        
+        walletLabel = new Label("0g 0s 0c");
+        walletLabel.setStyle(
+            "-fx-text-fill: #ffd700;" +
+            "-fx-font-size: 14px;" +
+            "-fx-font-weight: bold;"
+        );
+        walletBox.getChildren().add(walletLabel);
+        panel.getChildren().add(walletBox);
         
         // Filter Controls (no zoom buttons - use scroll wheel/trackpad)
         panel.getChildren().add(createSectionLabel("MAP FILTERS"));
@@ -234,109 +270,49 @@ public class InteractionMenu {
         return panel;
     }
     
-    // ==================== Build Panel ====================
+    // ==================== Character Panel ====================
     
-    private VBox createBuildPanel() {
+    private VBox createCharacterPanel() {
         VBox panel = new VBox(5);
         panel.setPadding(new Insets(10));
         panel.setStyle("-fx-background-color: " + MEDIUM_BG + ";");
         
-        // Production Buildings
-        panel.getChildren().add(createSectionLabel("PRODUCTION"));
-        panel.getChildren().addAll(
-            createButton("Lumber Camp"),
-            createButton("Mining Quarry"),
-            createButton("Farm"),
-            createButton("Factory")
-        );
+        // Character Actions
+        panel.getChildren().add(createSectionLabel("👤 CHARACTER"));
         
-        // Storage Buildings
-        panel.getChildren().add(createSectionLabel("STORAGE"));
-        panel.getChildren().addAll(
-            createButton("Warehouse"),
-            createButton("Distribution Center"),
-            createButton("Cold Storage")
-        );
+        Button characterSheetBtn = createButton("📜 Character Sheet");
+        Button inventoryBtn = createButton("🎒 Inventory");
+        Button gearBtn = createButton("⚔ Equipment");
         
-        // Infrastructure
-        panel.getChildren().add(createSectionLabel("INFRASTRUCTURE"));
-        panel.getChildren().addAll(
-            createButton("Road"),
-            createButton("Bridge"),
-            createButton("Logistics Hub")
-        );
+        characterSheetBtn.setOnAction(e -> { if (onOpenCharacterSheet != null) onOpenCharacterSheet.run(); });
+        inventoryBtn.setOnAction(e -> { if (onOpenInventory != null) onOpenInventory.run(); });
+        gearBtn.setOnAction(e -> { if (onOpenGearSheet != null) onOpenGearSheet.run(); });
         
-        return panel;
-    }
-    
-    // ==================== Logistics Panel ====================
-    
-    private VBox createLogisticsPanel() {
-        VBox panel = new VBox(5);
-        panel.setPadding(new Insets(10));
-        panel.setStyle("-fx-background-color: " + MEDIUM_BG + ";");
+        panel.getChildren().addAll(characterSheetBtn, inventoryBtn, gearBtn);
         
-        // Route Management
-        panel.getChildren().add(createSectionLabel("ROUTES"));
-        panel.getChildren().addAll(
-            createButton("Create Route"),
-            createButton("Edit Route"),
-            createButton("Delete Route"),
-            createButton("View All Routes")
-        );
+        // Social
+        panel.getChildren().add(createSectionLabel("👥 SOCIAL"));
         
-        // Vehicle Management
-        panel.getChildren().add(createSectionLabel("VEHICLES"));
-        panel.getChildren().addAll(
-            createButton("Purchase Vehicle"),
-            createButton("Assign Vehicle"),
-            createButton("View Fleet"),
-            createButton("Maintenance")
-        );
+        Button relationshipsBtn = createButton("🤝 Relationships");
+        Button reputationBtn = createButton("⭐ Reputation");
         
-        // Scheduling
-        panel.getChildren().add(createSectionLabel("SCHEDULING"));
-        panel.getChildren().addAll(
-            createButton("Schedule Delivery"),
-            createButton("View Schedule"),
-            createButton("Optimize Routes")
-        );
+        relationshipsBtn.setOnAction(e -> { if (onOpenRelationships != null) onOpenRelationships.run(); });
+        reputationBtn.setOnAction(e -> { if (onOpenRelationships != null) onOpenRelationships.run(); });
         
-        return panel;
-    }
-    
-    // ==================== Economy Panel ====================
-    
-    private VBox createEconomyPanel() {
-        VBox panel = new VBox(5);
-        panel.setPadding(new Insets(10));
-        panel.setStyle("-fx-background-color: " + MEDIUM_BG + ";");
+        panel.getChildren().addAll(relationshipsBtn, reputationBtn);
         
-        // Reports
-        panel.getChildren().add(createSectionLabel("REPORTS"));
-        panel.getChildren().addAll(
-            createButton("Revenue Report"),
-            createButton("Cost Analysis"),
-            createButton("Efficiency Report"),
-            createButton("Export Data")
-        );
+        // Progression
+        panel.getChildren().add(createSectionLabel("📈 PROGRESSION"));
         
-        // Analytics
-        panel.getChildren().add(createSectionLabel("ANALYTICS"));
-        panel.getChildren().addAll(
-            createButton("Supply Chain View"),
-            createButton("Market Trends"),
-            createButton("Demand Forecast"),
-            createButton("Bottleneck Analysis")
-        );
+        Button skillsBtn = createButton("⚡ Skills");
+        Button journalBtn = createButton("📖 Journal");
+        Button achievementsBtn = createButton("🏆 Achievements");
         
-        // Management
-        panel.getChildren().add(createSectionLabel("MANAGEMENT"));
-        panel.getChildren().addAll(
-            createButton("View Inventory"),
-            createButton("Set Prices"),
-            createButton("Hire Staff")
-        );
+        skillsBtn.setOnAction(e -> { if (onOpenSkills != null) onOpenSkills.run(); });
+        journalBtn.setOnAction(e -> { if (onOpenJournal != null) onOpenJournal.run(); });
+        achievementsBtn.setOnAction(e -> { if (onOpenJournal != null) onOpenJournal.run(); });
+        
+        panel.getChildren().addAll(skillsBtn, journalBtn, achievementsBtn);
         
         return panel;
     }
@@ -560,6 +536,30 @@ public class InteractionMenu {
      */
     public void setMainMenuHandler(Runnable mainMenu) {
         this.onMainMenu = mainMenu;
+    }
+    
+    /**
+     * Sets handlers for character panel buttons.
+     */
+    public void setCharacterHandlers(Runnable characterSheet, Runnable gearSheet, Runnable inventory, 
+                                      Runnable relationships, Runnable skills, Runnable journal) {
+        this.onOpenCharacterSheet = characterSheet;
+        this.onOpenGearSheet = gearSheet;
+        this.onOpenInventory = inventory;
+        this.onOpenRelationships = relationships;
+        this.onOpenSkills = skills;
+        this.onOpenJournal = journal;
+    }
+    
+    /**
+     * Updates the wallet display with current currency.
+     */
+    public void updateWallet(Currency currency) {
+        this.playerCurrency = currency;
+        if (walletLabel != null && currency != null) {
+            walletLabel.setText(String.format("%dg %ds %dc", 
+                currency.getGold(), currency.getSilver(), currency.getCopper()));
+        }
     }
     
     /**

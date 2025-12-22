@@ -1,3 +1,4 @@
+import javafx.animation.AnimationTimer;
 import javafx.animation.TranslateTransition;
 import javafx.application.Application;
 import javafx.geometry.Insets;
@@ -39,6 +40,13 @@ public class LogiMapUI extends Application {
     // World data
     private DemoWorld world;
     private String worldName;
+    
+    // Player and gameplay
+    private PlayerSprite player;
+    private TownInteractionMenu townInteractionMenu;
+    private LoreDialogue loreDialogue;
+    private AnimationTimer gameLoop;
+    private long lastUpdateTime = 0;
     
     // Callback for returning to main menu
     private Runnable onReturnToMenu;
@@ -154,6 +162,12 @@ public class LogiMapUI extends Application {
     private void initializeMapDisplayWithWorld() {
         if (world != null) {
             mapCanvas = new MapCanvas(world);
+            
+            // Create player at starting town
+            initializePlayer();
+            
+            // Set up town interaction callback
+            mapCanvas.setOnTownInteraction(this::handleTownInteraction);
         } else {
             mapCanvas = new MapCanvas();
         }
@@ -169,6 +183,155 @@ public class LogiMapUI extends Application {
         // Create center stack that will hold map and overlay menu
         centerStack = new StackPane(mapContainer);
         mainLayout.setCenter(centerStack);
+        
+        // Start the game loop
+        startGameLoop();
+    }
+    
+    /**
+     * Initializes the player sprite at the starting town.
+     */
+    private void initializePlayer() {
+        if (world == null) return;
+        
+        // Get the starting town
+        Town startingTown = world.getStartingTown();
+        int startX, startY;
+        
+        if (startingTown != null) {
+            // Place player at the center of the starting town
+            startX = startingTown.getGridX() + startingTown.getSize() / 2;
+            startY = startingTown.getGridY() + startingTown.getSize() / 2;
+            System.out.println("Player starting at town: " + startingTown.getName());
+        } else {
+            // Fallback to world start position
+            startX = world.getStartX();
+            startY = world.getStartY();
+        }
+        
+        // Create the player sprite
+        player = new PlayerSprite("Adventurer", startX, startY);
+        mapCanvas.setPlayer(player);
+        
+        // Store starting position for delayed centering
+        final int finalStartX = startX;
+        final int finalStartY = startY;
+        
+        // Delay the view centering until canvas is properly sized
+        javafx.application.Platform.runLater(() -> {
+            // Use another runLater to ensure layout is complete
+            javafx.application.Platform.runLater(() -> {
+                mapCanvas.setView(finalStartX, finalStartY, 0.8);
+                System.out.println("Camera centered on player at: " + finalStartX + ", " + finalStartY);
+            });
+        });
+    }
+    
+    /**
+     * Starts the game loop for animations and updates.
+     */
+    private void startGameLoop() {
+        gameLoop = new AnimationTimer() {
+            private long lastWalletUpdate = 0;
+            
+            @Override
+            public void handle(long now) {
+                if (lastUpdateTime == 0) {
+                    lastUpdateTime = now;
+                    return;
+                }
+                
+                // Calculate delta time in seconds
+                double deltaTime = (now - lastUpdateTime) / 1_000_000_000.0;
+                lastUpdateTime = now;
+                
+                // Cap delta time to prevent large jumps
+                deltaTime = Math.min(deltaTime, 0.1);
+                
+                // Update game state
+                mapCanvas.update(deltaTime);
+                
+                // Update wallet display every 500ms
+                if (now - lastWalletUpdate > 500_000_000) {
+                    if (player != null && interactionMenu != null) {
+                        interactionMenu.updateWallet(player.getCurrency());
+                    }
+                    lastWalletUpdate = now;
+                }
+                
+                // Render
+                mapCanvas.render();
+            }
+        };
+        gameLoop.start();
+    }
+    
+    /**
+     * Stops the game loop.
+     */
+    public void stopGameLoop() {
+        if (gameLoop != null) {
+            gameLoop.stop();
+        }
+    }
+    
+    /**
+     * Handles right-click interaction with a town.
+     * Shows lore dialogue first, then town menu if player chooses to enter.
+     */
+    private void handleTownInteraction(Town town) {
+        if (loreDialogue != null && player != null) {
+            // Generate a lord name for castles (major towns)
+            String lordName = generateLordName(town.getName());
+            
+            if (town.isMajor()) {
+                // Major towns are castles - show castle arrival dialogue
+                loreDialogue.showCastleArrival(lordName, town.getName(), 
+                    () -> {
+                        // Player chose to enter - show town menu
+                        if (townInteractionMenu != null) {
+                            townInteractionMenu.showForTown(town, player);
+                        }
+                    },
+                    () -> {
+                        // Player chose to leave - do nothing
+                        System.out.println("Player left " + town.getName());
+                    }
+                );
+            } else {
+                // Minor towns - show simpler town arrival dialogue
+                loreDialogue.showTownArrival(town.getName(), false,
+                    () -> {
+                        // Player chose to enter - show town menu
+                        if (townInteractionMenu != null) {
+                            townInteractionMenu.showForTown(town, player);
+                        }
+                    },
+                    () -> {
+                        // Player chose to leave - do nothing
+                        System.out.println("Player continued past " + town.getName());
+                    }
+                );
+            }
+        }
+    }
+    
+    /**
+     * Generates a lord name based on the town name.
+     */
+    private String generateLordName(String townName) {
+        // Use the town name seed to generate a consistent lord name
+        long seed = townName.hashCode();
+        String[] firstNames = {"Aldric", "Edmund", "Godfrey", "Harald", "Leofric", 
+                              "Oswald", "Roderick", "Theodric", "Wulfric", "Cedric",
+                              "Baldwin", "Conrad", "Dietrich", "Eberhard", "Friedrich"};
+        String[] lastNames = {"Blackwood", "Ironforge", "Stormwind", "Ravencrest", "Goldmane",
+                             "Silverbane", "Thornwall", "Nightfall", "Dragonheart", "Lionmane"};
+        
+        int firstIndex = (int) Math.abs(seed % firstNames.length);
+        int lastIndex = (int) Math.abs((seed / 100) % lastNames.length);
+        
+        return firstNames[firstIndex] + " " + lastNames[lastIndex];
     }
     
     /**
@@ -212,8 +375,34 @@ public class LogiMapUI extends Application {
         // Position on left side
         StackPane.setAlignment(menuPanel, Pos.CENTER_LEFT);
         
+        // Create town interaction menu
+        townInteractionMenu = new TownInteractionMenu();
+        townInteractionMenu.setOnTrade(() -> {
+            System.out.println("Opening marketplace...");
+            // TODO: Implement marketplace
+        });
+        townInteractionMenu.setOnRest(() -> {
+            if (player != null && player.getGold() >= 10) {
+                player.addGold(-10);
+                player.setHealth(player.getMaxHealth());
+                System.out.println("Rested at inn. Health restored!");
+            }
+        });
+        townInteractionMenu.setOnRecruit(() -> {
+            System.out.println("Opening recruitment...");
+            // TODO: Implement recruitment
+        });
+        townInteractionMenu.setOnViewInfo(() -> {
+            System.out.println("Viewing town info...");
+            // TODO: Implement town info view
+        });
+        
+        // Create lore dialogue for story interactions
+        loreDialogue = new LoreDialogue();
+        
         // Add to the center stack (overlays the map)
-        centerStack.getChildren().add(menuPanel);
+        // Order matters: menu panel, town interaction, then lore dialogue on top
+        centerStack.getChildren().addAll(menuPanel, townInteractionMenu, loreDialogue);
     }
     
     /**
@@ -358,6 +547,21 @@ public class LogiMapUI extends Application {
         
         // Main Menu handler
         interactionMenu.setMainMenuHandler(() -> returnToMainMenu());
+        
+        // Character handlers
+        interactionMenu.setCharacterHandlers(
+            () -> openCharacterSheet(),
+            () -> openGearSheet(),
+            () -> openInventory(),
+            () -> openRelationships(),
+            () -> openSkills(),
+            () -> openJournal()
+        );
+        
+        // Update wallet display
+        if (player != null) {
+            interactionMenu.updateWallet(player.getCurrency());
+        }
     }
     
     /**
@@ -496,15 +700,146 @@ public class LogiMapUI extends Application {
      * Switches the active tab and updates UI accordingly.
      */
     public void switchTab(String tabName) {
-        boolean showControls = tabName.equals("Local") || tabName.equals("Region");
+        switch (tabName) {
+            case "Map":
+                menuPanel.setVisible(true);
+                mapCanvas.setMapMode("Map");
+                break;
+                
+            case "Region":
+                menuPanel.setVisible(true);
+                mapCanvas.setMapMode("Region");
+                break;
+                
+            default:
+                menuPanel.setVisible(true);
+                break;
+        }
+    }
+    
+    // Character Sheet UI reference
+    private CharacterSheet characterSheetUI;
+    private GearSheet gearSheetUI;
+
+    /**
+     * Opens the character sheet window (stats and attributes).
+     */
+    private void openCharacterSheet() {
+        if (player == null) return;
         
-        if (showControls) {
-            menuPanel.setVisible(true);
-        } else {
-            menuPanel.setVisible(false);
+        if (characterSheetUI == null) {
+            characterSheetUI = new CharacterSheet(player);
+            characterSheetUI.setOnClose(() -> characterSheetUI.setVisible(false));
         }
         
-        mapCanvas.setMapMode(tabName);
+        // Update and show
+        characterSheetUI.refresh();
+        
+        if (!centerStack.getChildren().contains(characterSheetUI)) {
+            centerStack.getChildren().add(characterSheetUI);
+        }
+        
+        // Position to the left of center
+        double x = (centerStack.getWidth() - characterSheetUI.getPrefWidth()) / 2 - 150;
+        double y = (centerStack.getHeight() - characterSheetUI.getPrefHeight()) / 2;
+        characterSheetUI.setLayoutX(Math.max(10, x));
+        characterSheetUI.setLayoutY(Math.max(10, y));
+        
+        characterSheetUI.setVisible(true);
+        characterSheetUI.toFront();
+    }
+    
+    /**
+     * Opens the gear/equipment sheet window.
+     */
+    private void openGearSheet() {
+        if (player == null) return;
+        
+        if (gearSheetUI == null) {
+            gearSheetUI = new GearSheet(player);
+            gearSheetUI.setOnClose(() -> gearSheetUI.setVisible(false));
+            gearSheetUI.setOnGearChanged(() -> {
+                if (characterSheetUI != null) characterSheetUI.refresh();
+            });
+        }
+        
+        // Update and show
+        gearSheetUI.refresh();
+        
+        if (!centerStack.getChildren().contains(gearSheetUI)) {
+            centerStack.getChildren().add(gearSheetUI);
+        }
+        
+        // Position to the right of center
+        double x = (centerStack.getWidth() - gearSheetUI.getPrefWidth()) / 2 + 150;
+        double y = (centerStack.getHeight() - gearSheetUI.getPrefHeight()) / 2;
+        gearSheetUI.setLayoutX(Math.max(10, x));
+        gearSheetUI.setLayoutY(Math.max(10, y));
+        
+        gearSheetUI.setVisible(true);
+        gearSheetUI.toFront();
+    }
+
+    // Inventory UI reference
+    private InventoryUI inventoryUI;
+    private DraggableWindow inventoryWindow;
+
+    /**
+     * Opens the inventory window.
+     */
+    private void openInventory() {
+        if (player == null) return;
+        
+        if (inventoryWindow == null) {
+            inventoryUI = new InventoryUI(player.getInventory());
+            inventoryUI.setOnClose(() -> inventoryWindow.setVisible(false));
+            
+            // Wrap in draggable window
+            inventoryWindow = new DraggableWindow("🎒 Inventory", 
+                inventoryUI.getPrefWidth() + 20, inventoryUI.getPrefHeight() + 50);
+            inventoryWindow.setContent(inventoryUI);
+            inventoryWindow.setOnClose(() -> inventoryWindow.setVisible(false));
+        }
+        
+        // Refresh and show
+        inventoryUI.refresh();
+        
+        if (!centerStack.getChildren().contains(inventoryWindow)) {
+            centerStack.getChildren().add(inventoryWindow);
+        }
+        
+        // Position below center
+        double x = (centerStack.getWidth() - inventoryWindow.getPrefWidth()) / 2;
+        double y = (centerStack.getHeight() - inventoryWindow.getPrefHeight()) / 2 + 100;
+        inventoryWindow.setLayoutX(Math.max(10, x));
+        inventoryWindow.setLayoutY(Math.max(10, y));
+        
+        inventoryWindow.setVisible(true);
+        inventoryWindow.toFront();
+    }
+    
+    /**
+     * Opens the relationships panel.
+     */
+    private void openRelationships() {
+        // TODO: Implement relationships panel
+        newsTicker.addNewsItem("Relationships panel coming soon!");
+    }
+    
+    /**
+     * Opens the skills panel.
+     */
+    private void openSkills() {
+        // TODO: Implement skills panel
+        newsTicker.addNewsItem("Skills panel coming soon!");
+    }
+    
+    /**
+     * Opens the journal.
+     */
+    private void openJournal() {
+        // TODO: Implement journal
+        newsTicker.addNewsItem("Journal coming soon!");
     }
     
     /**
