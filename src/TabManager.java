@@ -10,7 +10,7 @@ public class TabManager {
     private HBox tabBar;
     private LogiMapUI parentUI;
     private Button[] tabButtons;
-    private String currentTab = "Local";
+    private String currentTab = "Map";
     
     private static final String DARK_BG = "#1a1a1a";
     private static final String MEDIUM_BG = "#2a2a2a";
@@ -19,7 +19,11 @@ public class TabManager {
     private static final String TEXT_COLOR = "#e0e0e0";
     
     private static final String[] TAB_NAMES = {
-        "Local", "Region", "Production", "Finance", "Analytics"
+        "Map", "Region"
+    };
+    
+    private static final String[] TAB_ICONS = {
+        "🗺", "🌍"
     };
     
     public TabManager(LogiMapUI parentUI) {
@@ -37,11 +41,11 @@ public class TabManager {
         
         for (int i = 0; i < TAB_NAMES.length; i++) {
             final String tabName = TAB_NAMES[i];
-            Button tabButton = new Button(tabName);
+            Button tabButton = new Button(TAB_ICONS[i] + " " + tabName);
             tabButton.getStyleClass().add("tab-button");
             
             // Style the button
-            updateTabButtonStyle(tabButton, i == 0); // First tab (Local) is active by default
+            updateTabButtonStyle(tabButton, i == 0); // First tab (Map) is active by default
             
             tabButton.setOnAction(e -> selectTab(tabName));
             

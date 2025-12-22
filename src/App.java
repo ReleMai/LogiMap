@@ -224,7 +224,7 @@ public class App extends Application {
      */
     private DemoWorld createWorld(WorldGenMenu.WorldConfig config) {
         // Set the seed for world generation
-        return new DemoWorld(config.worldName, config.seed, config.startX, config.startY);
+        return new DemoWorld(config.worldName, config.seed, config.startX, config.startY, config.startRegionName);
     }
     
     /**
@@ -252,8 +252,9 @@ public class App extends Application {
         // LogiMapUI expects to set up its own scene, so we call start
         gameUI.startWithRoot(primaryStage, root);
         
-        // Center the camera on the starting location
-        gameUI.setView(config.startX, config.startY, 0.5);
+        // Center the camera on the player's starting location (updated by DemoWorld)
+        // Using world.getStartX/Y which reflects the actual town center position
+        gameUI.setView(world.getStartX(), world.getStartY(), 0.8);
     }
     
     public static void main(String[] args) {

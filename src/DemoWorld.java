@@ -23,6 +23,8 @@ public class DemoWorld {
     private List<MapStructure> structures;
     private long seed;
     private int startX, startY;
+    private String startRegionName;  // Name of the starting region/town
+    private Town startingTown;  // Cached starting town reference
     
     // World metadata
     private List<PointOfInterest> pointsOfInterest;
@@ -42,12 +44,26 @@ public class DemoWorld {
      * @param startY Starting Y position
      */
     public DemoWorld(String worldName, long seed, int startX, int startY) {
+        this(worldName, seed, startX, startY, null);
+    }
+    
+    /**
+     * Constructor with custom world configuration and starting region name.
+     * @param worldName Name of the world
+     * @param seed Random seed for generation
+     * @param startX Starting X position
+     * @param startY Starting Y position
+     * @param startRegionName Name of the starting region (town name)
+     */
+    public DemoWorld(String worldName, long seed, int startX, int startY, String startRegionName) {
         this.seed = seed;
         this.startX = startX;
         this.startY = startY;
+        this.startRegionName = startRegionName;
         this.mapName = worldName;
         
         System.out.println("=== DemoWorld: Initializing World '" + worldName + "' with seed " + seed + " ===");
+        System.out.println("Starting location: (" + startX + ", " + startY + ") - Region: " + (startRegionName != null ? startRegionName : "auto"));
         
         // Use the new WorldGenerator for terrain
         this.worldGen = new WorldGenerator(MAP_WIDTH, MAP_HEIGHT, seed);
@@ -106,6 +122,9 @@ public class DemoWorld {
     private void generateDemoStructures() {
         Random rand = new Random(seed);
         
+        // First, create the starting town at the player's chosen location
+        createStartingTown();
+        
         // Find optimal locations for major towns using terrain analysis - more for larger map
         List<int[]> majorTownLocations = findOptimalTownLocations(8, true, rand);
         List<int[]> minorTownLocations = findOptimalTownLocations(20, false, rand);
@@ -127,6 +146,32 @@ public class DemoWorld {
         }
         
         System.out.println("DemoWorld: Placed " + structures.size() + " structures");
+    }
+    
+    /**
+     * Creates the starting town at the player's chosen location.
+     */
+    private void createStartingTown() {
+        // Find a suitable location near the starting point
+        int[] location = findSuitableLocation(startX, startY);
+        
+        // Use the specified region name, or generate one if not provided
+        String townName;
+        if (startRegionName != null && !startRegionName.isEmpty()) {
+            townName = startRegionName;
+        } else {
+            townName = getTerrainAppropriateName(location[0], location[1], true);
+        }
+        
+        // Create the starting town as a major town
+        startingTown = new Town(location[0], location[1], townName, true);
+        placeStructure(startingTown);
+        
+        // Update startX/startY to match the actual town center
+        this.startX = location[0] + startingTown.getSize() / 2;
+        this.startY = location[1] + startingTown.getSize() / 2;
+        
+        System.out.println("DemoWorld: Created starting town '" + townName + "' at (" + location[0] + ", " + location[1] + ")");
     }
     
     /**
@@ -430,6 +475,129 @@ public class DemoWorld {
     
     public List<MapStructure> getStructures() {
         return structures;
+    }
+    
+    /**
+     * Gets all towns in the world.
+     */
+    public List<Town> getTowns() {
+        List<Town> towns = new ArrayList<>();
+        for (MapStructure structure : structures) {
+            if (structure instanceof Town) {
+                towns.add((Town) structure);
+            }
+        }
+        return towns;
+    }
+    
+    /**
+     * Gets all major towns in the world.
+     */
+    public List<Town> getMajorTowns() {
+        List<Town> towns = new ArrayList<>();
+        for (MapStructure structure : structures) {
+            if (structure instanceof Town && ((Town) structure).isMajor()) {
+                towns.add((Town) structure);
+            }
+        }
+        return towns;
+    }
+    
+    /**
+     * Gets the starting town - returns the town created at the player's chosen starting location.
+     */
+    public Town getStartingTown() {
+        // Return the cached starting town if it exists
+        if (startingTown != null) {
+            return startingTown;
+        }
+        
+        // Fallback: find the closest town to the starting position
+        List<Town> allTowns = getTowns();
+        
+        if (allTowns.isEmpty()) {
+            return null;
+        }
+        
+        Town closestTown = null;
+        double closestDist = Double.MAX_VALUE;
+        
+        for (Town town : allTowns) {
+            int townCenterX = town.getGridX() + town.getSize() / 2;
+            int townCenterY = town.getGridY() + town.getSize() / 2;
+            double dist = Math.sqrt(Math.pow(townCenterX - startX, 2) + Math.pow(townCenterY - startY, 2));
+            
+            if (dist < closestDist) {
+                closestDist = dist;
+                closestTown = town;
+            }
+        }
+        
+        return closestTown;
+    }
+    
+    /**
+     * Finds a suitable location for a structure near the target position.
+     * Searches in expanding squares around the target.
+     */
+    private int[] findSuitableLocation(int targetX, int targetY) {
+        TerrainType[][] terrainMap = terrain.getTerrainMap();
+        
+        // Search in expanding radius
+        for (int radius = 0; radius <= 30; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dy = -radius; dy <= radius; dy++) {
+                    // Only check perimeter for efficiency (except radius 0)
+                    if (radius > 0 && Math.abs(dx) != radius && Math.abs(dy) != radius) continue;
+                    
+                    int x = targetX + dx;
+                    int y = targetY + dy;
+                    
+                    // Check bounds
+                    if (x < 5 || x >= MAP_WIDTH - 15 || y < 5 || y >= MAP_HEIGHT - 15) continue;
+                    
+                    // Check if terrain is buildable
+                    TerrainType t = terrainMap[x][y];
+                    if (t == TerrainType.PLAINS || t == TerrainType.FOREST || t == TerrainType.GRASS || t == TerrainType.MEADOW) {
+                        // Check if area is clear
+                        if (isAreaClear(x, y, 10)) {
+                            return new int[]{x, y};
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fallback - just return target if nothing suitable found
+        return new int[]{Math.max(5, Math.min(targetX, MAP_WIDTH - 15)), Math.max(5, Math.min(targetY, MAP_HEIGHT - 15))};
+    }
+    
+    /**
+     * Checks if an area is clear of other structures.
+     */
+    private boolean isAreaClear(int x, int y, int size) {
+        for (MapStructure struct : structures) {
+            int sx = struct.getGridX();
+            int sy = struct.getGridY();
+            int ssize = struct.getSize();
+            
+            // Check for overlap with buffer
+            if (x < sx + ssize + 5 && x + size + 5 > sx &&
+                y < sy + ssize + 5 && y + size + 5 > sy) {
+                return false;
+            }
+        }
+        return true;
+    }
+    
+    /**
+     * Sets the player starting position to a specific town.
+     */
+    public void setStartingTown(Town town) {
+        if (town != null) {
+            this.startX = town.getGridX() + town.getSize() / 2;
+            this.startY = town.getGridY() + town.getSize() / 2;
+        }
     }
     
     public int getMapWidth() {

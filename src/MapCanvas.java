@@ -8,6 +8,8 @@ import javafx.scene.input.ScrollEvent;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
+import java.util.function.Consumer;
+
 /**
  * Canvas component for rendering the game map with terrain, structures, and roads.
  * Supports panning, zooming, and interactive selection.
@@ -40,6 +42,15 @@ public class MapCanvas {
     private boolean isDragging = false;
     private MapStructure hoveredStructure = null;
     private MapStructure selectedStructure = null;
+    private double dragStartX;
+    private double dragStartY;
+    private static final double CLICK_THRESHOLD = 5.0; // Pixels to distinguish click from drag
+    
+    // Player and movement
+    private PlayerSprite player;
+    private MovementFlag movementFlag;
+    private Consumer<Town> onTownInteraction;  // Callback when player arrives at a town
+    private Town pendingTownInteraction = null;  // Town to interact with when player arrives
     
     // Tooltip state
     private boolean ctrlHeld = false;
@@ -87,9 +98,79 @@ public class MapCanvas {
         this.world = world;
         currentFilter = new StandardFilter();
         
+        // Initialize movement flag
+        this.movementFlag = new MovementFlag();
+        
         setupEventHandlers();
         setupResizeListeners();
         render();
+    }
+    
+    // ==================== Player Management ====================
+    
+    /**
+     * Sets the player sprite to render and control.
+     */
+    public void setPlayer(PlayerSprite player) {
+        this.player = player;
+    }
+    
+    /**
+     * Gets the current player sprite.
+     */
+    public PlayerSprite getPlayer() {
+        return player;
+    }
+    
+    /**
+     * Sets the callback for town right-click interactions.
+     */
+    public void setOnTownInteraction(Consumer<Town> handler) {
+        this.onTownInteraction = handler;
+    }
+    
+    /**
+     * Updates player and flag animations. Call this from a game loop.
+     */
+    public void update(double deltaTime) {
+        if (player != null) {
+            boolean wasMoving = player.isMoving();
+            player.update(deltaTime);
+            
+            // Check if player just stopped moving and has a pending town interaction
+            if (wasMoving && !player.isMoving() && pendingTownInteraction != null) {
+                // Check if player is at or near the town
+                if (isPlayerAtTown(pendingTownInteraction)) {
+                    Town town = pendingTownInteraction;
+                    pendingTownInteraction = null;
+                    
+                    // Trigger the town interaction callback
+                    if (onTownInteraction != null) {
+                        onTownInteraction.accept(town);
+                    }
+                }
+            }
+        }
+        if (movementFlag != null) {
+            movementFlag.update(deltaTime);
+        }
+    }
+    
+    /**
+     * Checks if the player is at or near the given town.
+     */
+    private boolean isPlayerAtTown(Town town) {
+        if (player == null || town == null) return false;
+        
+        int playerX = (int) player.getGridX();
+        int playerY = (int) player.getGridY();
+        int townX = town.getGridX();
+        int townY = town.getGridY();
+        int townSize = town.getSize();
+        
+        // Check if player is within or adjacent to town bounds
+        return playerX >= townX - 1 && playerX <= townX + townSize &&
+               playerY >= townY - 1 && playerY <= townY + townSize;
     }
     
     // ==================== Event Handling ====================
@@ -126,21 +207,103 @@ public class MapCanvas {
     private void handleMousePress(MouseEvent e) {
         lastMouseX = e.getX();
         lastMouseY = e.getY();
-        isDragging = true;
+        dragStartX = e.getX();
+        dragStartY = e.getY();
+        isDragging = false;  // Will become true if mouse moves enough
     }
     
     private void handleMouseRelease(MouseEvent e) {
+        // Calculate drag distance to distinguish click from drag
+        double dragDist = Math.sqrt(
+            Math.pow(e.getX() - dragStartX, 2) + 
+            Math.pow(e.getY() - dragStartY, 2)
+        );
+        
+        boolean wasClick = dragDist < CLICK_THRESHOLD;
         isDragging = false;
         
-        if (e.getButton() == MouseButton.PRIMARY) {
+        if (wasClick) {
             int[] gridPos = screenToGrid(e.getX(), e.getY());
-            MapStructure structure = world.getStructureAt(gridPos[0], gridPos[1]);
-            selectedStructure = structure;
-            render();
+            
+            if (e.getButton() == MouseButton.PRIMARY) {
+                // Left click: Move player to this location
+                handleLeftClick(gridPos[0], gridPos[1]);
+            } else if (e.getButton() == MouseButton.SECONDARY) {
+                // Right click: Interact with structure
+                handleRightClick(gridPos[0], gridPos[1]);
+            }
         }
+        
+        render();
+    }
+    
+    /**
+     * Handles left-click: Move player to clicked location.
+     */
+    private void handleLeftClick(int gridX, int gridY) {
+        // Check if the terrain is walkable
+        TerrainType[][] terrainMap = world.getTerrain().getTerrainMap();
+        if (gridX >= 0 && gridX < world.getMapWidth() && gridY >= 0 && gridY < world.getMapHeight()) {
+            TerrainType terrain = terrainMap[gridX][gridY];
+            if (terrain != null && !terrain.isWater()) {
+                // Set movement flag at clicked location
+                if (movementFlag != null) {
+                    movementFlag.setPosition(gridX, gridY);
+                }
+                
+                // Move player toward the location
+                if (player != null) {
+                    player.moveTo(gridX, gridY);
+                }
+            }
+        }
+        
+        // Still allow structure selection
+        MapStructure structure = world.getStructureAt(gridX, gridY);
+        selectedStructure = structure;
+    }
+    
+    /**
+     * Handles right-click: Interact with structures (especially towns).
+     */
+    private void handleRightClick(int gridX, int gridY) {
+        MapStructure structure = world.getStructureAt(gridX, gridY);
+        
+        if (structure instanceof Town) {
+            Town town = (Town) structure;
+            
+            // Move player to the town
+            if (player != null) {
+                // Move to center of town
+                int targetX = structure.getGridX() + structure.getSize() / 2;
+                int targetY = structure.getGridY() + structure.getSize() / 2;
+                player.moveTo(targetX, targetY);
+                
+                // Set pending interaction - will trigger when player arrives
+                pendingTownInteraction = town;
+            }
+            
+            // Set flag at town
+            if (movementFlag != null) {
+                movementFlag.setPosition(structure.getGridX() + structure.getSize() / 2, 
+                                        structure.getGridY() + structure.getSize() / 2);
+            }
+        }
+        
+        selectedStructure = structure;
     }
     
     private void handleMouseDrag(MouseEvent e) {
+        double dragDist = Math.sqrt(
+            Math.pow(e.getX() - dragStartX, 2) + 
+            Math.pow(e.getY() - dragStartY, 2)
+        );
+        
+        // Only start dragging if moved past threshold
+        if (dragDist >= CLICK_THRESHOLD) {
+            isDragging = true;
+        }
+        
         if (isDragging) {
             double deltaX = e.getX() - lastMouseX;
             double deltaY = e.getY() - lastMouseY;
@@ -182,7 +345,10 @@ public class MapCanvas {
     
     // ==================== Rendering ====================
     
-    private void render() {
+    /**
+     * Renders the entire map canvas.
+     */
+    public void render() {
         double width = canvas.getWidth();
         double height = canvas.getHeight();
         
@@ -194,6 +360,12 @@ public class MapCanvas {
         renderTerrain(width, height);
         renderRoads(width, height);
         renderStructures(width, height);
+        
+        // Render movement flag (below player)
+        renderMovementFlag();
+        
+        // Render player sprite
+        renderPlayer();
         
         // Render overlays
         if (hoveredStructure != null) {
@@ -208,6 +380,42 @@ public class MapCanvas {
         
         // Render UI
         renderMapInfo(width);
+    }
+    
+    /**
+     * Renders the movement flag indicator.
+     */
+    private void renderMovementFlag() {
+        if (movementFlag == null || !movementFlag.isVisible()) return;
+        
+        double[] pos = gridToScreen((int) movementFlag.getGridX(), (int) movementFlag.getGridY());
+        double tileSize = GRID_SIZE * zoom;
+        
+        movementFlag.render(gc, pos[0], pos[1], tileSize);
+    }
+    
+    /**
+     * Renders the player sprite on the map.
+     */
+    private void renderPlayer() {
+        if (player == null) return;
+        
+        double[] pos = gridToScreen((int) player.getGridX(), (int) player.getGridY());
+        double tileSize = GRID_SIZE * zoom;
+        
+        // Only render if visible on screen
+        if (pos[0] + tileSize >= 0 && pos[0] <= canvas.getWidth() &&
+            pos[1] + tileSize >= 0 && pos[1] <= canvas.getHeight()) {
+            
+            // Scale sprite size based on zoom, but keep minimum size
+            double spriteSize = Math.max(30, tileSize * 1.2);
+            
+            // Center sprite on tile
+            double spriteX = pos[0] + (tileSize - spriteSize) / 2;
+            double spriteY = pos[1] + (tileSize - spriteSize);
+            
+            player.render(gc, spriteX, spriteY, spriteSize);
+        }
     }
     
     private void renderTerrain(double width, double height) {
