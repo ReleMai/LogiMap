@@ -20,15 +20,16 @@ import java.util.List;
  */
 public class ShopUI extends StackPane {
     
-    // Style constants
-    private static final String DARK_BG = "#1a1a1a";
-    private static final String MEDIUM_BG = "#2a2a2a";
-    private static final String LIGHT_BG = "#3a3a3a";
-    private static final String ACCENT_COLOR = "#4a9eff";
-    private static final String TEXT_COLOR = "#e0e0e0";
+    // Style constants - Medieval theme (consistent with other UIs)
+    private static final String DARK_BG = "#1a1510";
+    private static final String MEDIUM_BG = "#252015";
+    private static final String LIGHT_BG = "#352a1a";
+    private static final String ACCENT_COLOR = "#c4a574";
+    private static final String TEXT_COLOR = "#d4c4a4";
     private static final String GOLD_COLOR = "#ffd700";
-    private static final String SUCCESS_COLOR = "#44ff44";
-    private static final String ERROR_COLOR = "#ff4444";
+    private static final String SUCCESS_COLOR = "#6aaa64";
+    private static final String ERROR_COLOR = "#c04040";
+    private static final String BORDER_COLOR = "#5a4a30";
     
     // Shop data
     private String shopName;
@@ -82,15 +83,15 @@ public class ShopUI extends StackPane {
         mainPanel.setMaxHeight(650);
         mainPanel.setStyle(
             "-fx-background-color: " + MEDIUM_BG + ";" +
-            "-fx-background-radius: 12;" +
-            "-fx-border-color: " + GOLD_COLOR + ";" +
+            "-fx-background-radius: 10;" +
+            "-fx-border-color: " + BORDER_COLOR + ";" +
             "-fx-border-width: 2;" +
-            "-fx-border-radius: 12;"
+            "-fx-border-radius: 10;"
         );
         
         DropShadow shadow = new DropShadow();
         shadow.setColor(Color.BLACK);
-        shadow.setRadius(30);
+        shadow.setRadius(20);
         mainPanel.setEffect(shadow);
         
         // Header

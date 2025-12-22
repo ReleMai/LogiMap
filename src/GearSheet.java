@@ -139,8 +139,28 @@ public class GearSheet extends DraggableWindow {
                 // Right-click to unequip
                 Equipment removed = player.unequip(slot);
                 if (removed != null) {
-                    // Try to add to inventory
-                    // Note: Would need to convert Equipment to ItemStack
+                    // Create a generic unequipped item for inventory
+                    // Uses the Item system's full constructor
+                    Item equipItem = new Item(
+                        "unequipped_" + removed.getName().toLowerCase().replace(" ", "_"),
+                        removed.getName(),
+                        "Unequipped gear",
+                        Item.Category.EQUIPMENT,
+                        Item.Rarity.COMMON,
+                        1, // max stack
+                        removed.getValue(),
+                        removed.getPrimaryColor() != null ? removed.getPrimaryColor() : javafx.scene.paint.Color.GRAY,
+                        removed.getSecondaryColor() != null ? removed.getSecondaryColor() : javafx.scene.paint.Color.DARKGRAY,
+                        "⚔"
+                    );
+                    ItemStack stack = new ItemStack(equipItem, 1);
+                    ItemStack overflow = player.getInventory().addItem(stack);
+                    
+                    // If inventory full, re-equip
+                    if (overflow != null && !overflow.isEmpty()) {
+                        player.equip(removed);
+                    }
+                    
                     renderSlot(canvas, slot, true);
                     renderSprite();
                     if (onGearChanged != null) onGearChanged.run();

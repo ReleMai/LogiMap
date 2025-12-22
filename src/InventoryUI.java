@@ -65,18 +65,13 @@ public class InventoryUI extends VBox {
         this.inventory = inventory;
         
         setSpacing(6);
-        setPadding(new Insets(8));
+        setPadding(new Insets(0));
         setMaxWidth(Region.USE_PREF_SIZE);
         setMaxHeight(Region.USE_PREF_SIZE);
-        setStyle(
-            "-fx-background-color: " + MEDIUM_BG + ";" +
-            "-fx-background-radius: 8;" +
-            "-fx-border-color: " + BORDER_COLOR + ";" +
-            "-fx-border-width: 2;" +
-            "-fx-border-radius: 8;"
-        );
+        // No background - will be inside DraggableWindow
+        setStyle("-fx-background-color: transparent;");
         
-        // Title bar
+        // Title bar with sort buttons
         HBox titleBar = createTitleBar();
         
         // Canvas for rendering slots
@@ -110,12 +105,9 @@ public class InventoryUI extends VBox {
     }
     
     private HBox createTitleBar() {
-        HBox titleBar = new HBox(10);
+        HBox titleBar = new HBox(8);
         titleBar.setAlignment(Pos.CENTER_LEFT);
-        
-        Label title = new Label(inventory.getName());
-        title.setFont(Font.font("System", FontWeight.BOLD, 14));
-        title.setTextFill(Color.web(ACCENT_COLOR));
+        titleBar.setPadding(new Insets(0, 0, 4, 0));
         
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -125,31 +117,6 @@ public class InventoryUI extends VBox {
         Button sortRarityBtn = createSortButton("★", "Sort by rarity", () -> inventory.sort(Inventory.SortMode.RARITY));
         Button sortValueBtn = createSortButton("$", "Sort by value", () -> inventory.sort(Inventory.SortMode.VALUE));
         Button stackBtn = createSortButton("⊞", "Stack items", () -> inventory.stackItems());
-        
-        // Close button
-        Button closeBtn = new Button("✕");
-        closeBtn.setTooltip(new Tooltip("Close"));
-        closeBtn.setStyle(
-            "-fx-background-color: transparent;" +
-            "-fx-text-fill: #e05050;" +
-            "-fx-padding: 4 8 4 8;" +
-            "-fx-cursor: hand;"
-        );
-        closeBtn.setOnMouseEntered(e -> closeBtn.setStyle(
-            "-fx-background-color: #503030;" +
-            "-fx-text-fill: #ff7070;" +
-            "-fx-padding: 4 8 4 8;" +
-            "-fx-cursor: hand;"
-        ));
-        closeBtn.setOnMouseExited(e -> closeBtn.setStyle(
-            "-fx-background-color: transparent;" +
-            "-fx-text-fill: #e05050;" +
-            "-fx-padding: 4 8 4 8;" +
-            "-fx-cursor: hand;"
-        ));
-        closeBtn.setOnAction(e -> {
-            if (onClose != null) onClose.run();
-        });
         
         // Slot count
         Label slotCount = new Label(inventory.getUsedSlots() + "/" + inventory.getSize());
@@ -161,7 +128,7 @@ public class InventoryUI extends VBox {
             render();
         });
         
-        titleBar.getChildren().addAll(title, spacer, sortNameBtn, sortRarityBtn, sortValueBtn, stackBtn, slotCount, closeBtn);
+        titleBar.getChildren().addAll(sortNameBtn, sortRarityBtn, sortValueBtn, stackBtn, spacer, slotCount);
         
         return titleBar;
     }
