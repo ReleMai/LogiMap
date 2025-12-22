@@ -1,0 +1,571 @@
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Slider;
+import javafx.scene.control.ToggleButton;
+import javafx.scene.control.ToggleGroup;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
+
+/**
+ * Right-side interaction menu with tabbed organization.
+ * Provides controls for building, transport, viewing, and analysis.
+ */
+public class InteractionMenu {
+    
+    // Layout components
+    private final VBox container;
+    private final VBox contentArea;
+    private final HBox tabBar;
+    private final ToggleGroup tabGroup;
+    
+    // Tab content panels
+    private VBox mapPanel;
+    private VBox buildPanel;
+    private VBox logisticsPanel;
+    private VBox economyPanel;
+    private VBox settingsPanel;
+    
+    // Control handlers
+    private Runnable onStandardFilter;
+    private Runnable onTopoFilter;
+    private Runnable onHeatmapFilter;
+    private java.util.function.Consumer<Double> onGridBrightness;
+    private Runnable onToggleGridIds;
+    private Runnable onSaveWorld;
+    private Runnable onLoadWorld;
+    private Runnable onMainMenu;
+    
+    // Style constants - Medieval theme
+    private static final String DARK_BG = "#1f1a10";
+    private static final String MEDIUM_BG = "#2d2418";
+    private static final String LIGHT_BG = "#3d3020";
+    private static final String ACCENT_COLOR = "#c4a574";
+    private static final String TEXT_COLOR = "#d4c4a4";
+    private static final String TAB_ACTIVE = "#5a4a30";
+    private static final String TAB_INACTIVE = "#2d2418";
+    
+    public InteractionMenu() {
+        container = new VBox();
+        container.setPrefWidth(260);
+        container.setStyle(
+            "-fx-background-color: transparent;"
+        );
+        
+        tabGroup = new ToggleGroup();
+        tabBar = createTabBar();
+        contentArea = new VBox();
+        VBox.setVgrow(contentArea, Priority.ALWAYS);
+        
+        createTabPanels();
+        
+        container.getChildren().addAll(tabBar, contentArea);
+        
+        // Show Map tab by default
+        showPanel(mapPanel);
+    }
+    
+    /**
+     * Creates the tab bar with toggle buttons using icons.
+     */
+    private HBox createTabBar() {
+        HBox bar = new HBox(2);
+        bar.setPadding(new Insets(5));
+        bar.setAlignment(Pos.CENTER);
+        bar.setStyle("-fx-background-color: " + DARK_BG + ";");
+        
+        // Using emoji/unicode icons for tabs
+        ToggleButton mapTab = createTab("🗺", "Map", mapPanel);           // Map icon
+        ToggleButton buildTab = createTab("🏗", "Build", buildPanel);      // Construction icon
+        ToggleButton logisticsTab = createTab("🚚", "Logistics", logisticsPanel); // Truck icon
+        ToggleButton economyTab = createTab("📊", "Economy", economyPanel);  // Chart icon
+        ToggleButton settingsTab = createTab("⚙", "Settings", settingsPanel); // Gear icon
+        
+        mapTab.setSelected(true);
+        
+        bar.getChildren().addAll(mapTab, buildTab, logisticsTab, economyTab, settingsTab);
+        return bar;
+    }
+    
+    /**
+     * Creates a tab toggle button with icon and tooltip.
+     */
+    private ToggleButton createTab(String icon, String tooltip, VBox panel) {
+        ToggleButton tab = new ToggleButton(icon);
+        tab.setToggleGroup(tabGroup);
+        tab.setMaxWidth(Double.MAX_VALUE);
+        tab.setMinWidth(40);
+        tab.setPrefWidth(45);
+        HBox.setHgrow(tab, Priority.ALWAYS);
+        
+        // Add tooltip to show full name on hover
+        tab.setTooltip(new javafx.scene.control.Tooltip(tooltip));
+        
+        tab.setStyle(createIconTabStyle(false));
+        
+        tab.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            tab.setStyle(createIconTabStyle(newVal));
+            if (newVal && panel != null) {
+                showPanel(panel);
+            }
+        });
+        
+        // Store panel reference for lazy initialization
+        tab.setUserData(tooltip);
+        
+        return tab;
+    }
+    
+    /**
+     * Creates CSS style for tab button.
+     */
+    private String createTabStyle(boolean selected) {
+        String bgColor = selected ? TAB_ACTIVE : TAB_INACTIVE;
+        String textColor = selected ? "white" : TEXT_COLOR;
+        return String.format(
+            "-fx-background-color: %s;" +
+            "-fx-text-fill: %s;" +
+            "-fx-font-size: 10px;" +
+            "-fx-font-weight: bold;" +
+            "-fx-padding: 6 8 6 8;" +
+            "-fx-background-radius: 3 3 0 0;",
+            bgColor, textColor
+        );
+    }
+    
+    /**
+     * Creates CSS style for icon tab button.
+     */
+    private String createIconTabStyle(boolean selected) {
+        String bgColor = selected ? TAB_ACTIVE : TAB_INACTIVE;
+        String textColor = selected ? "white" : TEXT_COLOR;
+        return String.format(
+            "-fx-background-color: %s;" +
+            "-fx-text-fill: %s;" +
+            "-fx-font-size: 16px;" +
+            "-fx-padding: 8 4 8 4;" +
+            "-fx-background-radius: 3 3 0 0;" +
+            "-fx-cursor: hand;",
+            bgColor, textColor
+        );
+    }
+    
+    /**
+     * Creates all tab content panels.
+     */
+    private void createTabPanels() {
+        mapPanel = createMapPanel();
+        buildPanel = createBuildPanel();
+        logisticsPanel = createLogisticsPanel();
+        economyPanel = createEconomyPanel();
+        settingsPanel = createSettingsPanel();
+    }
+    
+    /**
+     * Shows the specified panel in the content area.
+     */
+    private void showPanel(VBox panel) {
+        contentArea.getChildren().clear();
+        if (panel != null) {
+            ScrollPane scrollPane = new ScrollPane(panel);
+            scrollPane.setFitToWidth(true);
+            scrollPane.setStyle(
+                "-fx-background: " + MEDIUM_BG + ";" +
+                "-fx-background-color: " + MEDIUM_BG + ";"
+            );
+            VBox.setVgrow(scrollPane, Priority.ALWAYS);
+            contentArea.getChildren().add(scrollPane);
+        }
+    }
+    
+    // ==================== Map Panel ====================
+    
+    private VBox createMapPanel() {
+        VBox panel = new VBox(5);
+        panel.setPadding(new Insets(10));
+        panel.setStyle("-fx-background-color: " + MEDIUM_BG + ";");
+        
+        // Filter Controls (no zoom buttons - use scroll wheel/trackpad)
+        panel.getChildren().add(createSectionLabel("MAP FILTERS"));
+        
+        Button standardBtn = createButton("Standard View");
+        Button topoBtn = createButton("Topographical");
+        Button heatmapBtn = createButton("Resource Heatmap");
+        
+        standardBtn.setOnAction(e -> { if (onStandardFilter != null) onStandardFilter.run(); });
+        topoBtn.setOnAction(e -> { if (onTopoFilter != null) onTopoFilter.run(); });
+        heatmapBtn.setOnAction(e -> { if (onHeatmapFilter != null) onHeatmapFilter.run(); });
+        
+        panel.getChildren().addAll(standardBtn, topoBtn, heatmapBtn);
+        
+        // Grid Controls
+        panel.getChildren().add(createSectionLabel("GRID OPTIONS"));
+        
+        Button lightenBtn = createButton("Lighten Grid");
+        Button darkenBtn = createButton("Darken Grid");
+        Button toggleIdsBtn = createButton("Toggle Grid IDs");
+        
+        lightenBtn.setOnAction(e -> { if (onGridBrightness != null) onGridBrightness.accept(1.3); });
+        darkenBtn.setOnAction(e -> { if (onGridBrightness != null) onGridBrightness.accept(0.7); });
+        toggleIdsBtn.setOnAction(e -> { if (onToggleGridIds != null) onToggleGridIds.run(); });
+        
+        panel.getChildren().addAll(lightenBtn, darkenBtn, toggleIdsBtn);
+        
+        // Game Controls
+        panel.getChildren().add(createSectionLabel("GAME"));
+        
+        Button saveBtn = createButton("💾 Save World");
+        Button loadBtn = createButton("📂 Load World");
+        Button menuBtn = createButton("🏠 Main Menu");
+        
+        saveBtn.setOnAction(e -> { if (onSaveWorld != null) onSaveWorld.run(); });
+        loadBtn.setOnAction(e -> { if (onLoadWorld != null) onLoadWorld.run(); });
+        menuBtn.setOnAction(e -> { if (onMainMenu != null) onMainMenu.run(); });
+        
+        panel.getChildren().addAll(saveBtn, loadBtn, menuBtn);
+        
+        return panel;
+    }
+    
+    // ==================== Build Panel ====================
+    
+    private VBox createBuildPanel() {
+        VBox panel = new VBox(5);
+        panel.setPadding(new Insets(10));
+        panel.setStyle("-fx-background-color: " + MEDIUM_BG + ";");
+        
+        // Production Buildings
+        panel.getChildren().add(createSectionLabel("PRODUCTION"));
+        panel.getChildren().addAll(
+            createButton("Lumber Camp"),
+            createButton("Mining Quarry"),
+            createButton("Farm"),
+            createButton("Factory")
+        );
+        
+        // Storage Buildings
+        panel.getChildren().add(createSectionLabel("STORAGE"));
+        panel.getChildren().addAll(
+            createButton("Warehouse"),
+            createButton("Distribution Center"),
+            createButton("Cold Storage")
+        );
+        
+        // Infrastructure
+        panel.getChildren().add(createSectionLabel("INFRASTRUCTURE"));
+        panel.getChildren().addAll(
+            createButton("Road"),
+            createButton("Bridge"),
+            createButton("Logistics Hub")
+        );
+        
+        return panel;
+    }
+    
+    // ==================== Logistics Panel ====================
+    
+    private VBox createLogisticsPanel() {
+        VBox panel = new VBox(5);
+        panel.setPadding(new Insets(10));
+        panel.setStyle("-fx-background-color: " + MEDIUM_BG + ";");
+        
+        // Route Management
+        panel.getChildren().add(createSectionLabel("ROUTES"));
+        panel.getChildren().addAll(
+            createButton("Create Route"),
+            createButton("Edit Route"),
+            createButton("Delete Route"),
+            createButton("View All Routes")
+        );
+        
+        // Vehicle Management
+        panel.getChildren().add(createSectionLabel("VEHICLES"));
+        panel.getChildren().addAll(
+            createButton("Purchase Vehicle"),
+            createButton("Assign Vehicle"),
+            createButton("View Fleet"),
+            createButton("Maintenance")
+        );
+        
+        // Scheduling
+        panel.getChildren().add(createSectionLabel("SCHEDULING"));
+        panel.getChildren().addAll(
+            createButton("Schedule Delivery"),
+            createButton("View Schedule"),
+            createButton("Optimize Routes")
+        );
+        
+        return panel;
+    }
+    
+    // ==================== Economy Panel ====================
+    
+    private VBox createEconomyPanel() {
+        VBox panel = new VBox(5);
+        panel.setPadding(new Insets(10));
+        panel.setStyle("-fx-background-color: " + MEDIUM_BG + ";");
+        
+        // Reports
+        panel.getChildren().add(createSectionLabel("REPORTS"));
+        panel.getChildren().addAll(
+            createButton("Revenue Report"),
+            createButton("Cost Analysis"),
+            createButton("Efficiency Report"),
+            createButton("Export Data")
+        );
+        
+        // Analytics
+        panel.getChildren().add(createSectionLabel("ANALYTICS"));
+        panel.getChildren().addAll(
+            createButton("Supply Chain View"),
+            createButton("Market Trends"),
+            createButton("Demand Forecast"),
+            createButton("Bottleneck Analysis")
+        );
+        
+        // Management
+        panel.getChildren().add(createSectionLabel("MANAGEMENT"));
+        panel.getChildren().addAll(
+            createButton("View Inventory"),
+            createButton("Set Prices"),
+            createButton("Hire Staff")
+        );
+        
+        return panel;
+    }
+    
+    // ==================== Settings Panel ====================
+    
+    private VBox createSettingsPanel() {
+        VBox panel = new VBox(5);
+        panel.setPadding(new Insets(10));
+        panel.setStyle("-fx-background-color: " + MEDIUM_BG + ";");
+        
+        // Display Settings
+        panel.getChildren().add(createSectionLabel("DISPLAY"));
+        
+        // Resolution selector
+        Label resLabel = createSmallLabel("Resolution:");
+        ComboBox<String> resolutionBox = new ComboBox<>();
+        resolutionBox.getItems().addAll("1280x720", "1366x768", "1600x900", "1920x1080", "2560x1440", "3840x2160");
+        resolutionBox.setValue(GameSettings.getInstance().getResolution().toString().replace("_", "x").replace("RES", ""));
+        resolutionBox.setMaxWidth(Double.MAX_VALUE);
+        styleComboBox(resolutionBox);
+        
+        // Display mode selector
+        Label modeLabel = createSmallLabel("Display Mode:");
+        ComboBox<String> displayModeBox = new ComboBox<>();
+        displayModeBox.getItems().addAll("Fullscreen", "Windowed Fullscreen", "Windowed");
+        displayModeBox.setValue(formatDisplayMode(GameSettings.getInstance().getDisplayMode()));
+        displayModeBox.setMaxWidth(Double.MAX_VALUE);
+        styleComboBox(displayModeBox);
+        
+        // VSync checkbox
+        CheckBox vsyncCheck = new CheckBox("VSync");
+        vsyncCheck.setSelected(GameSettings.getInstance().isVsync());
+        vsyncCheck.setStyle("-fx-text-fill: " + TEXT_COLOR + ";");
+        
+        panel.getChildren().addAll(resLabel, resolutionBox, modeLabel, displayModeBox, vsyncCheck);
+        
+        // Audio Settings
+        panel.getChildren().add(createSectionLabel("AUDIO"));
+        
+        Label musicLabel = createSmallLabel("Music Volume:");
+        Slider musicSlider = new Slider(0, 100, GameSettings.getInstance().getMusicVolume());
+        musicSlider.setShowTickLabels(true);
+        musicSlider.setShowTickMarks(true);
+        musicSlider.setMajorTickUnit(25);
+        
+        Label sfxLabel = createSmallLabel("SFX Volume:");
+        Slider sfxSlider = new Slider(0, 100, GameSettings.getInstance().getSfxVolume());
+        sfxSlider.setShowTickLabels(true);
+        sfxSlider.setShowTickMarks(true);
+        sfxSlider.setMajorTickUnit(25);
+        
+        panel.getChildren().addAll(musicLabel, musicSlider, sfxLabel, sfxSlider);
+        
+        // Gameplay Settings
+        panel.getChildren().add(createSectionLabel("GAMEPLAY"));
+        
+        CheckBox autosaveCheck = new CheckBox("Auto-save");
+        autosaveCheck.setSelected(GameSettings.getInstance().isAutoSave());
+        autosaveCheck.setStyle("-fx-text-fill: " + TEXT_COLOR + ";");
+        
+        Label autosaveLabel = createSmallLabel("Auto-save Interval (minutes):");
+        Slider autosaveSlider = new Slider(1, 30, GameSettings.getInstance().getAutoSaveInterval());
+        autosaveSlider.setShowTickLabels(true);
+        autosaveSlider.setShowTickMarks(true);
+        autosaveSlider.setMajorTickUnit(5);
+        autosaveSlider.setDisable(!GameSettings.getInstance().isAutoSave());
+        
+        autosaveCheck.setOnAction(e -> autosaveSlider.setDisable(!autosaveCheck.isSelected()));
+        
+        panel.getChildren().addAll(autosaveCheck, autosaveLabel, autosaveSlider);
+        
+        // Apply button
+        Button applyBtn = createButton("Apply Settings");
+        applyBtn.setStyle(applyBtn.getStyle() + "-fx-background-color: " + ACCENT_COLOR + "; -fx-text-fill: white;");
+        applyBtn.setOnAction(e -> {
+            // Save settings
+            GameSettings settings = GameSettings.getInstance();
+            settings.setResolution(parseResolution(resolutionBox.getValue()));
+            settings.setDisplayMode(parseDisplayMode(displayModeBox.getValue()));
+            settings.setVsync(vsyncCheck.isSelected());
+            settings.setMusicVolume((int) musicSlider.getValue());
+            settings.setSfxVolume((int) sfxSlider.getValue());
+            settings.setAutoSave(autosaveCheck.isSelected());
+            settings.setAutoSaveInterval((int) autosaveSlider.getValue());
+            settings.save();
+        });
+        
+        panel.getChildren().add(applyBtn);
+        
+        return panel;
+    }
+    
+    private Label createSmallLabel(String text) {
+        Label label = new Label(text);
+        label.setStyle("-fx-text-fill: " + TEXT_COLOR + "; -fx-font-size: 11px;");
+        return label;
+    }
+    
+    private void styleComboBox(ComboBox<String> box) {
+        box.setStyle(
+            "-fx-background-color: " + LIGHT_BG + ";" +
+            "-fx-border-color: #505050;" +
+            "-fx-border-radius: 3;" +
+            "-fx-background-radius: 3;"
+        );
+    }
+    
+    private String formatDisplayMode(GameSettings.DisplayMode mode) {
+        switch (mode) {
+            case FULLSCREEN: return "Fullscreen";
+            case WINDOWED_FULLSCREEN: return "Windowed Fullscreen";
+            case WINDOWED: return "Windowed";
+            default: return "Windowed";
+        }
+    }
+    
+    private GameSettings.DisplayMode parseDisplayMode(String text) {
+        switch (text) {
+            case "Fullscreen": return GameSettings.DisplayMode.FULLSCREEN;
+            case "Windowed Fullscreen": return GameSettings.DisplayMode.WINDOWED_FULLSCREEN;
+            case "Windowed": return GameSettings.DisplayMode.WINDOWED;
+            default: return GameSettings.DisplayMode.WINDOWED;
+        }
+    }
+    
+    private GameSettings.Resolution parseResolution(String text) {
+        switch (text) {
+            case "1280x720": return GameSettings.Resolution.RES_1280x720;
+            case "1366x768": return GameSettings.Resolution.RES_1366x768;
+            case "1600x900": return GameSettings.Resolution.RES_1600x900;
+            case "1920x1080": return GameSettings.Resolution.RES_1920x1080;
+            case "2560x1440": return GameSettings.Resolution.RES_2560x1440;
+            case "3840x2160": return GameSettings.Resolution.RES_3840x2160;
+            default: return GameSettings.Resolution.RES_1920x1080;
+        }
+    }
+    
+    // ==================== UI Helpers ====================
+    
+    /**
+     * Creates a section label.
+     */
+    private Label createSectionLabel(String text) {
+        Label label = new Label(text);
+        label.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+        label.setStyle(
+            "-fx-text-fill: " + ACCENT_COLOR + ";" +
+            "-fx-padding: 10 0 5 0;"
+        );
+        return label;
+    }
+    
+    /**
+     * Creates a styled button.
+     */
+    private Button createButton(String text) {
+        Button button = new Button(text);
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setAlignment(Pos.CENTER_LEFT);
+        
+        String normalStyle = String.format(
+            "-fx-background-color: %s;" +
+            "-fx-text-fill: %s;" +
+            "-fx-font-size: 11px;" +
+            "-fx-padding: 8 10 8 10;" +
+            "-fx-cursor: hand;" +
+            "-fx-background-radius: 3;" +
+            "-fx-border-radius: 3;",
+            LIGHT_BG, TEXT_COLOR
+        );
+        
+        String hoverStyle = String.format(
+            "-fx-background-color: %s;" +
+            "-fx-text-fill: white;" +
+            "-fx-font-size: 11px;" +
+            "-fx-padding: 8 10 8 10;" +
+            "-fx-cursor: hand;" +
+            "-fx-background-radius: 3;" +
+            "-fx-border-radius: 3;",
+            ACCENT_COLOR
+        );
+        
+        button.setStyle(normalStyle);
+        button.setOnMouseEntered(e -> button.setStyle(hoverStyle));
+        button.setOnMouseExited(e -> button.setStyle(normalStyle));
+        
+        return button;
+    }
+    
+    // ==================== Handler Setters ====================
+    
+    /**
+     * Sets handlers for grid controls.
+     */
+    public void setGridControlHandlers(java.util.function.Consumer<Double> brightnessSetter, 
+                                       Runnable toggleIds) {
+        this.onGridBrightness = brightnessSetter;
+        this.onToggleGridIds = toggleIds;
+    }
+    
+    /**
+     * Sets handlers for filter controls.
+     */
+    public void setFilterHandlers(Runnable standard, Runnable topo, Runnable heatmap) {
+        this.onStandardFilter = standard;
+        this.onTopoFilter = topo;
+        this.onHeatmapFilter = heatmap;
+    }
+    
+    /**
+     * Sets handlers for save/load controls.
+     */
+    public void setSaveLoadHandlers(Runnable saveWorld, Runnable loadWorld) {
+        this.onSaveWorld = saveWorld;
+        this.onLoadWorld = loadWorld;
+    }
+    
+    /**
+     * Sets handler for main menu button.
+     */
+    public void setMainMenuHandler(Runnable mainMenu) {
+        this.onMainMenu = mainMenu;
+    }
+    
+    /**
+     * Returns the main container.
+     */
+    public VBox getContainer() {
+        return container;
+    }
+}

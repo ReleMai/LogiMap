@@ -1,0 +1,808 @@
+import javafx.scene.canvas.Canvas;
+import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.image.WritableImage;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.input.ScrollEvent;
+import javafx.scene.paint.Color;
+import javafx.scene.text.Font;
+
+/**
+ * Canvas component for rendering the game map with terrain, structures, and roads.
+ * Supports panning, zooming, and interactive selection.
+ * 
+ * Performance optimizations:
+ * - Level of Detail (LOD) rendering at low zoom levels
+ * - Tile batching to reduce draw calls
+ * - Cached terrain colors
+ */
+public class MapCanvas {
+    
+    // Canvas components
+    private final Canvas canvas;
+    private final GraphicsContext gc;
+    
+    // View state
+    private double offsetX = 0;
+    private double offsetY = 0;
+    private double zoom = 1.0;
+    private static final int GRID_SIZE = 50;
+    private String mapMode = "Local";
+    
+    // World data
+    private final DemoWorld world;
+    private MapFilter currentFilter;
+    
+    // Interaction state
+    private double lastMouseX;
+    private double lastMouseY;
+    private boolean isDragging = false;
+    private MapStructure hoveredStructure = null;
+    private MapStructure selectedStructure = null;
+    
+    // Tooltip state
+    private boolean ctrlHeld = false;
+    private int tooltipGridX = -1;
+    private int tooltipGridY = -1;
+    private double tooltipScreenX = 0;
+    private double tooltipScreenY = 0;
+    
+    // Grid display options
+    private double gridBrightness = 1.0;
+    private boolean showGridNumbers = false;
+    
+    // Style constants
+    private static final Color GRID_LINE_COLOR = Color.web("#505050");
+    private static final Color BG_COLOR = Color.web("#1a1a1a");
+    private static final Color TEXT_COLOR = Color.web("#e0e0e0");
+    private static final Color TOOLTIP_BG = Color.web("rgba(20, 20, 30, 0.92)");
+    private static final Color TOOLTIP_BORDER = Color.web("#4a9eff");
+    
+    // Zoom limits
+    private static final double MIN_ZOOM = 0.01;
+    private static final double MAX_ZOOM = 20.0;
+    private static final double GRID_FADE_START = 0.3;
+    private static final double GRID_FADE_END = 0.7;
+    
+    // LOD thresholds for performance optimization
+    private static final double LOD_THRESHOLD_1 = 0.15;  // Very low zoom - render in blocks
+    private static final double LOD_THRESHOLD_2 = 0.08;  // Ultra low zoom - larger blocks
+    private static final double LOD_THRESHOLD_3 = 0.04;  // Minimal zoom - very large blocks
+    
+    /**
+     * Creates a MapCanvas with a new default world.
+     */
+    public MapCanvas() {
+        this(new DemoWorld());
+    }
+    
+    /**
+     * Creates a MapCanvas with a pre-generated world.
+     */
+    public MapCanvas(DemoWorld world) {
+        canvas = new Canvas(1000, 700);
+        gc = canvas.getGraphicsContext2D();
+        
+        this.world = world;
+        currentFilter = new StandardFilter();
+        
+        setupEventHandlers();
+        setupResizeListeners();
+        render();
+    }
+    
+    // ==================== Event Handling ====================
+    
+    private void setupEventHandlers() {
+        canvas.setOnMousePressed(this::handleMousePress);
+        canvas.setOnMouseReleased(this::handleMouseRelease);
+        canvas.setOnMouseDragged(this::handleMouseDrag);
+        canvas.setOnMouseMoved(this::handleMouseMove);
+        canvas.setOnScroll(this::handleScroll);
+        
+        canvas.setFocusTraversable(true);
+        canvas.setOnKeyPressed(e -> {
+            if (e.getCode() == KeyCode.CONTROL) {
+                ctrlHeld = true;
+                render();
+            }
+        });
+        canvas.setOnKeyReleased(e -> {
+            if (e.getCode() == KeyCode.CONTROL) {
+                ctrlHeld = false;
+                tooltipGridX = -1;
+                tooltipGridY = -1;
+                render();
+            }
+        });
+    }
+    
+    private void setupResizeListeners() {
+        canvas.widthProperty().addListener((obs, oldVal, newVal) -> render());
+        canvas.heightProperty().addListener((obs, oldVal, newVal) -> render());
+    }
+    
+    private void handleMousePress(MouseEvent e) {
+        lastMouseX = e.getX();
+        lastMouseY = e.getY();
+        isDragging = true;
+    }
+    
+    private void handleMouseRelease(MouseEvent e) {
+        isDragging = false;
+        
+        if (e.getButton() == MouseButton.PRIMARY) {
+            int[] gridPos = screenToGrid(e.getX(), e.getY());
+            MapStructure structure = world.getStructureAt(gridPos[0], gridPos[1]);
+            selectedStructure = structure;
+            render();
+        }
+    }
+    
+    private void handleMouseDrag(MouseEvent e) {
+        if (isDragging) {
+            double deltaX = e.getX() - lastMouseX;
+            double deltaY = e.getY() - lastMouseY;
+            offsetX += deltaX;
+            offsetY += deltaY;
+            lastMouseX = e.getX();
+            lastMouseY = e.getY();
+            render();
+        }
+    }
+    
+    private void handleMouseMove(MouseEvent e) {
+        int[] gridPos = screenToGrid(e.getX(), e.getY());
+        hoveredStructure = world.getStructureAt(gridPos[0], gridPos[1]);
+        
+        if (ctrlHeld) {
+            tooltipGridX = gridPos[0];
+            tooltipGridY = gridPos[1];
+            tooltipScreenX = e.getX();
+            tooltipScreenY = e.getY();
+        }
+        
+        render();
+    }
+    
+    private void handleScroll(ScrollEvent e) {
+        double factor = e.getDeltaY() > 0 ? 1.1 : 0.9;
+        double oldZoom = zoom;
+        zoom = clamp(zoom * factor, MIN_ZOOM, MAX_ZOOM);
+        
+        // Zoom toward mouse position
+        double mouseX = e.getX();
+        double mouseY = e.getY();
+        offsetX = mouseX - (mouseX - offsetX) * (zoom / oldZoom);
+        offsetY = mouseY - (mouseY - offsetY) * (zoom / oldZoom);
+        
+        render();
+    }
+    
+    // ==================== Rendering ====================
+    
+    private void render() {
+        double width = canvas.getWidth();
+        double height = canvas.getHeight();
+        
+        // Clear canvas
+        gc.setFill(BG_COLOR);
+        gc.fillRect(0, 0, width, height);
+        
+        // Render layers
+        renderTerrain(width, height);
+        renderRoads(width, height);
+        renderStructures(width, height);
+        
+        // Render overlays
+        if (hoveredStructure != null) {
+            renderStructureHover(hoveredStructure);
+        }
+        if (selectedStructure != null) {
+            renderStructureSelection(selectedStructure);
+        }
+        if (ctrlHeld && tooltipGridX >= 0 && tooltipGridY >= 0) {
+            renderTileTooltip();
+        }
+        
+        // Render UI
+        renderMapInfo(width);
+    }
+    
+    private void renderTerrain(double width, double height) {
+        // Calculate visible grid range
+        int startX = (int) Math.floor(-offsetX / (GRID_SIZE * zoom)) - 1;
+        int startY = (int) Math.floor(-offsetY / (GRID_SIZE * zoom)) - 1;
+        int endX = (int) Math.ceil((width - offsetX) / (GRID_SIZE * zoom)) + 1;
+        int endY = (int) Math.ceil((height - offsetY) / (GRID_SIZE * zoom)) + 1;
+        
+        // Clamp to world bounds
+        startX = Math.max(0, startX);
+        startY = Math.max(0, startY);
+        endX = Math.min(world.getMapWidth(), endX);
+        endY = Math.min(world.getMapHeight(), endY);
+        
+        TerrainType[][] terrainMap = world.getTerrain().getTerrainMap();
+        
+        // Use Level of Detail (LOD) based on zoom level for performance
+        if (zoom < LOD_THRESHOLD_3) {
+            // Ultra-low zoom: render in 16x16 blocks
+            renderTerrainLOD(terrainMap, startX, startY, endX, endY, 16);
+        } else if (zoom < LOD_THRESHOLD_2) {
+            // Very low zoom: render in 8x8 blocks
+            renderTerrainLOD(terrainMap, startX, startY, endX, endY, 8);
+        } else if (zoom < LOD_THRESHOLD_1) {
+            // Low zoom: render in 4x4 blocks
+            renderTerrainLOD(terrainMap, startX, startY, endX, endY, 4);
+        } else {
+            // Normal zoom: render individual tiles
+            for (int x = startX; x < endX; x++) {
+                for (int y = startY; y < endY; y++) {
+                    renderTerrainTile(x, y, terrainMap[x][y]);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Renders terrain with Level of Detail - samples terrain at block intervals
+     * and draws larger rectangles for better performance at low zoom.
+     */
+    private void renderTerrainLOD(TerrainType[][] terrainMap, int startX, int startY, int endX, int endY, int blockSize) {
+        // Align to block boundaries
+        int alignedStartX = (startX / blockSize) * blockSize;
+        int alignedStartY = (startY / blockSize) * blockSize;
+        
+        for (int x = alignedStartX; x < endX; x += blockSize) {
+            for (int y = alignedStartY; y < endY; y += blockSize) {
+                // Sample terrain from center of block
+                int sampleX = Math.min(x + blockSize / 2, world.getMapWidth() - 1);
+                int sampleY = Math.min(y + blockSize / 2, world.getMapHeight() - 1);
+                TerrainType terrain = terrainMap[sampleX][sampleY];
+                
+                // Get color
+                Color terrainColor;
+                if (currentFilter instanceof ResourceHeatmapFilter) {
+                    terrainColor = ((ResourceHeatmapFilter) currentFilter).getCellColor(sampleX, sampleY);
+                } else if (terrain.isWater()) {
+                    terrainColor = getWaterColor(sampleX, sampleY);
+                } else {
+                    terrainColor = currentFilter.getTerrainColor(terrain);
+                }
+                
+                // Calculate screen position and size
+                double[] pos = gridToScreen(x, y);
+                double cellWidth = blockSize * GRID_SIZE * zoom;
+                double cellHeight = blockSize * GRID_SIZE * zoom;
+                
+                // Clamp to visible area
+                double drawX = pos[0];
+                double drawY = pos[1];
+                double drawW = Math.min(cellWidth, (endX - x) * GRID_SIZE * zoom);
+                double drawH = Math.min(cellHeight, (endY - y) * GRID_SIZE * zoom);
+                
+                gc.setFill(terrainColor);
+                gc.fillRect(drawX, drawY, drawW, drawH);
+            }
+        }
+    }
+    
+    private void renderTerrainTile(int x, int y, TerrainType terrain) {
+        // Determine tile color
+        Color terrainColor;
+        if (currentFilter instanceof ResourceHeatmapFilter) {
+            terrainColor = ((ResourceHeatmapFilter) currentFilter).getCellColor(x, y);
+        } else if (terrain.isWater()) {
+            terrainColor = getWaterColor(x, y);
+        } else {
+            terrainColor = currentFilter.getTerrainColor(terrain);
+        }
+        
+        double[] pos = gridToScreen(x, y);
+        double cellSize = GRID_SIZE * zoom;
+        
+        // Draw terrain
+        gc.setFill(terrainColor);
+        gc.fillRect(pos[0], pos[1], cellSize, cellSize);
+        
+        // Draw snow overlay
+        if (world.getTerrain().isSnow(x, y) && terrain.isMountainous()) {
+            gc.setFill(Color.color(1, 1, 1, 0.35));
+            gc.fillRect(pos[0], pos[1], cellSize, cellSize);
+        }
+        
+        // Draw grid lines with fade effect at low zoom
+        if (zoom > GRID_FADE_START) {
+            double gridOpacity = Math.min(1.0, (zoom - GRID_FADE_START) / (GRID_FADE_END - GRID_FADE_START));
+            Color gridColor = Color.color(
+                Math.min(1, GRID_LINE_COLOR.getRed() * gridBrightness),
+                Math.min(1, GRID_LINE_COLOR.getGreen() * gridBrightness),
+                Math.min(1, GRID_LINE_COLOR.getBlue() * gridBrightness),
+                gridOpacity * 0.6
+            );
+            gc.setStroke(gridColor);
+            gc.setLineWidth(0.5);
+            gc.strokeRect(pos[0], pos[1], cellSize, cellSize);
+            
+            // Draw grid IDs if enabled
+            if (showGridNumbers && zoom > 0.8) {
+                gc.setFill(Color.color(1, 1, 1, 0.7));
+                gc.setFont(new Font("Arial", Math.max(8, 10 * zoom)));
+                gc.fillText(String.valueOf(y * world.getMapWidth() + x), pos[0] + 4, pos[1] + 14);
+            }
+        }
+    }
+    
+    private Color getWaterColor(int x, int y) {
+        WaterType waterType = world.getTerrain().getWaterType(x, y);
+        if (waterType == null) {
+            waterType = WaterType.OCEAN;
+        }
+        
+        double depth = world.getTerrain().getWaterDepth(x, y);
+        
+        Color baseColor;
+        switch (waterType) {
+            case FRESH_LAKE:
+                baseColor = Color.web("#6ec5ff");
+                break;
+            case OCEAN_SHALLOW:
+                baseColor = Color.web("#4ec0cc");
+                break;
+            case OCEAN:
+                baseColor = Color.web("#1c6ea4");
+                break;
+            case OCEAN_DEEP:
+                baseColor = Color.web("#0b3f66");
+                break;
+            default:
+                baseColor = Color.web("#1e4d8b");
+        }
+        
+        // Darken based on depth
+        return baseColor.interpolate(Color.BLACK, clamp(depth * 0.6, 0, 0.6));
+    }
+    
+    private void renderRoads(double width, double height) {
+        RoadNetwork roadNetwork = world.getRoadNetwork();
+        
+        for (Road road : roadNetwork.getRoads()) {
+            Color roadColor = currentFilter.getRoadColor(road.getQuality());
+            double roadWidth = road.getQuality().getWidth() * zoom;
+            double offset = roadWidth / 2.5;
+            
+            java.util.List<javafx.geometry.Point2D> path = road.getPath();
+            for (int i = 0; i < path.size() - 1; i++) {
+                javafx.geometry.Point2D p1 = path.get(i);
+                javafx.geometry.Point2D p2 = path.get(i + 1);
+                
+                double[] screen1 = gridToScreen((int) p1.getX(), (int) p1.getY());
+                double[] screen2 = gridToScreen((int) p2.getX(), (int) p2.getY());
+                
+                double cx1 = screen1[0] + GRID_SIZE * zoom / 2;
+                double cy1 = screen1[1] + GRID_SIZE * zoom / 2;
+                double cx2 = screen2[0] + GRID_SIZE * zoom / 2;
+                double cy2 = screen2[1] + GRID_SIZE * zoom / 2;
+                
+                // Calculate perpendicular offset for double-line roads
+                double dx = cx2 - cx1;
+                double dy = cy2 - cy1;
+                double len = Math.sqrt(dx * dx + dy * dy);
+                
+                if (len > 0) {
+                    double perpX = -dy / len * offset;
+                    double perpY = dx / len * offset;
+                    
+                    gc.setStroke(roadColor);
+                    gc.setLineWidth(Math.max(1.0, roadWidth / 2));
+                    gc.strokeLine(cx1 + perpX, cy1 + perpY, cx2 + perpX, cy2 + perpY);
+                    gc.strokeLine(cx1 - perpX, cy1 - perpY, cx2 - perpX, cy2 - perpY);
+                }
+            }
+        }
+    }
+    
+    private void renderStructures(double width, double height) {
+        // Skip rendering structures at very low zoom for performance
+        if (zoom < LOD_THRESHOLD_2) {
+            // At very low zoom, only render structure markers with names
+            for (MapStructure structure : world.getStructures()) {
+                double[] pos = gridToScreen(structure.getGridX(), structure.getGridY());
+                double markerSize = Math.max(4, structure.getSize() * GRID_SIZE * zoom * 0.5);
+                
+                // Simple colored dot for each structure
+                boolean isMajor = structure instanceof Town && ((Town)structure).isMajor();
+                gc.setFill(isMajor ? Color.web("#ffd700") : Color.web("#ffaa66"));
+                gc.fillOval(pos[0], pos[1], markerSize, markerSize);
+                
+                // Draw name for towns even at low zoom
+                if (structure instanceof Town && zoom > 0.03) {
+                    Town town = (Town) structure;
+                    double fontSize = Math.max(8, 10);
+                    MedievalFont.renderLabel(gc, town.getName(), 
+                        pos[0] + markerSize / 2, pos[1] + markerSize + fontSize + 2, 
+                        fontSize, isMajor ? Color.web("#ffd700") : Color.web("#e0e0e0"));
+                }
+            }
+            return;
+        }
+        
+        for (MapStructure structure : world.getStructures()) {
+            double[] pos = gridToScreen(structure.getGridX(), structure.getGridY());
+            double size = structure.getSize() * GRID_SIZE * zoom;
+            
+            // Skip if off-screen
+            if (pos[0] + size < 0 || pos[0] > canvas.getWidth() ||
+                pos[1] + size < 0 || pos[1] > canvas.getHeight()) {
+                continue;
+            }
+            
+            // Use new sprite system for towns
+            if (structure instanceof Town) {
+                Town town = (Town) structure;
+                boolean nearWater = isNearWater(town.getGridX(), town.getGridY());
+                
+                // At medium zoom, use sprites; at low zoom, use simplified rendering
+                if (zoom >= 0.3 && size >= 30) {
+                    TownSprite.render(gc, town, pos[0], pos[1], size, nearWater);
+                } else {
+                    // Simplified rendering for small sizes
+                    gc.setFill(currentFilter.getStructureColor(structure));
+                    gc.fillRect(pos[0], pos[1], size, size);
+                    renderStructureDetails(structure, pos, size);
+                }
+            } else {
+                // Non-town structures
+                gc.setFill(currentFilter.getStructureColor(structure));
+                gc.fillRect(pos[0], pos[1], size, size);
+                renderStructureDetails(structure, pos, size);
+            }
+            
+            // Draw border
+            gc.setStroke(Color.web("#606060"));
+            gc.setLineWidth(1);
+            gc.strokeRect(pos[0], pos[1], size, size);
+            
+            // Draw medieval-style town names using MedievalFont
+            if (structure instanceof Town && zoom > 0.25 && size > 30) {
+                Town town = (Town) structure;
+                double fontSize = Math.max(10, Math.min(24, 14 * zoom));
+                double labelX = pos[0] + size / 2;
+                double labelY = pos[1] + size + fontSize + 8;
+                
+                MedievalFont.renderTownName(gc, town.getName(), labelX, labelY, fontSize, town.isMajor());
+            } else if (!(structure instanceof Town) && zoom > 0.5 && size > 50) {
+                // Simple labels for non-town structures
+                gc.setFill(TEXT_COLOR);
+                gc.setFont(new Font("Arial", Math.max(8, 12 * zoom)));
+                String label = structure.getName().substring(0, Math.min(15, structure.getName().length()));
+                gc.fillText(label, pos[0] + 5, pos[1] + size + 15);
+            }
+        }
+    }
+    
+    /**
+     * Checks if a position is near water (for port town detection).
+     */
+    private boolean isNearWater(int x, int y) {
+        TerrainType[][] terrain = world.getTerrain().getTerrainMap();
+        int checkRadius = 10;
+        
+        for (int dx = -checkRadius; dx <= checkRadius; dx++) {
+            for (int dy = -checkRadius; dy <= checkRadius; dy++) {
+                int nx = x + dx;
+                int ny = y + dy;
+                if (nx >= 0 && nx < world.getMapWidth() && ny >= 0 && ny < world.getMapHeight()) {
+                    if (terrain[nx][ny].isWater()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    
+    private void renderStructureDetails(MapStructure structure, double[] pos, double size) {
+        if (structure instanceof Town) {
+            Town town = (Town) structure;
+            if (town.isMajor()) {
+                // Major towns get corner towers
+                gc.setFill(Color.web("#ffcc00"));
+                double towerSize = Math.max(3, size * 0.15);
+                gc.fillRect(pos[0] + towerSize, pos[1] + towerSize, towerSize * 0.6, towerSize * 0.6);
+                gc.fillRect(pos[0] + size - towerSize * 1.6, pos[1] + towerSize, towerSize * 0.6, towerSize * 0.6);
+                gc.fillRect(pos[0] + towerSize, pos[1] + size - towerSize * 1.6, towerSize * 0.6, towerSize * 0.6);
+                gc.fillRect(pos[0] + size - towerSize * 1.6, pos[1] + size - towerSize * 1.6, towerSize * 0.6, towerSize * 0.6);
+                
+                // Center tower
+                gc.setFill(Color.web("#ffaa00"));
+                gc.fillRect(pos[0] + size/2 - towerSize*0.5, pos[1] + size/2 - towerSize*0.5, towerSize, towerSize);
+            } else {
+                // Minor towns get simple circle
+                gc.setFill(Color.web("#ffdd88"));
+                double circleSize = Math.max(2, size * 0.1);
+                gc.fillOval(pos[0] + size/2 - circleSize, pos[1] + size/2 - circleSize, circleSize * 2, circleSize * 2);
+            }
+        } else if (structure instanceof MiningQuarry || structure instanceof Stoneworks) {
+            // X marks for mining
+            gc.setStroke(Color.web("#888888"));
+            gc.setLineWidth(Math.max(1, size * 0.08));
+            double cross = size * 0.3;
+            gc.strokeLine(pos[0] + cross, pos[1] + cross, pos[0] + size - cross, pos[1] + size - cross);
+            gc.strokeLine(pos[0] + size - cross, pos[1] + cross, pos[0] + cross, pos[1] + size - cross);
+        } else if (structure instanceof LumberCamp) {
+            // Tree symbol for lumber
+            gc.setFill(Color.web("#228822"));
+            double treeSize = Math.max(2, size * 0.12);
+            gc.fillPolygon(
+                new double[]{pos[0] + size/2, pos[0] + size/2 - treeSize, pos[0] + size/2 + treeSize},
+                new double[]{pos[1] + size * 0.2, pos[1] + size * 0.45, pos[1] + size * 0.45}, 3
+            );
+            gc.fillPolygon(
+                new double[]{pos[0] + size/2, pos[0] + size/2 - treeSize * 0.8, pos[0] + size/2 + treeSize * 0.8},
+                new double[]{pos[1] + size * 0.35, pos[1] + size * 0.55, pos[1] + size * 0.55}, 3
+            );
+        } else if (structure instanceof Millworks) {
+            // Circle for mills
+            gc.setFill(Color.web("#cc8844"));
+            double radius = Math.max(2, size * 0.15);
+            gc.fillOval(pos[0] + size/2 - radius, pos[1] + size/2 - radius, radius * 2, radius * 2);
+        }
+    }
+    
+    private void renderStructureHover(MapStructure structure) {
+        double[] pos = gridToScreen(structure.getGridX(), structure.getGridY());
+        double size = structure.getSize() * GRID_SIZE * zoom;
+        
+        gc.setStroke(Color.web("#ffff00"));
+        gc.setLineWidth(3);
+        gc.strokeRect(pos[0], pos[1], size, size);
+        
+        // Tooltip
+        gc.setFill(Color.web("rgba(0,0,0,0.8)"));
+        gc.fillRect(pos[0], pos[1] - 30, 200, 30);
+        gc.setFill(Color.web("#ffff00"));
+        gc.setFont(new Font("Arial", 10));
+        gc.fillText(structure.getName() + " (" + structure.getType() + ")", pos[0] + 5, pos[1] - 10);
+    }
+    
+    private void renderStructureSelection(MapStructure structure) {
+        double[] pos = gridToScreen(structure.getGridX(), structure.getGridY());
+        double size = structure.getSize() * GRID_SIZE * zoom;
+        
+        gc.setStroke(Color.web("#00ff00"));
+        gc.setLineWidth(4);
+        gc.strokeRect(pos[0] - 2, pos[1] - 2, size + 4, size + 4);
+    }
+    
+    private void renderTileTooltip() {
+        if (!isValidGridPosition(tooltipGridX, tooltipGridY)) {
+            return;
+        }
+        
+        TerrainGenerator terrain = world.getTerrain();
+        TerrainType tt = terrain.getTerrainMap()[tooltipGridX][tooltipGridY];
+        
+        // Build tooltip content
+        StringBuilder sb = new StringBuilder();
+        sb.append("📍 Tile [").append(tooltipGridX).append(", ").append(tooltipGridY).append("]\n");
+        sb.append("━━━━━━━━━━━━━━━━━━━━\n");
+        sb.append("🏔 Terrain: ").append(tt.getDisplayName()).append("\n");
+        sb.append("📊 Elevation: ").append(String.format("%.2f", terrain.getElevation(tooltipGridX, tooltipGridY))).append("\n");
+        
+        if (tt.isWater()) {
+            WaterType wt = terrain.getWaterType(tooltipGridX, tooltipGridY);
+            sb.append("🌊 Water Type: ").append(wt != null ? formatWaterType(wt) : "Water").append("\n");
+            sb.append("🔵 Depth: ").append(String.format("%.2f", terrain.getWaterDepth(tooltipGridX, tooltipGridY))).append("\n");
+        }
+        
+        // Show climate info
+        try {
+            double moisture = world.getWorldGenerator().getMoisture(tooltipGridX, tooltipGridY);
+            double temperature = world.getWorldGenerator().getTemperature(tooltipGridX, tooltipGridY);
+            sb.append("💧 Moisture: ").append(String.format("%.0f%%", moisture * 100)).append("\n");
+            sb.append("🌡 Temperature: ").append(getTemperatureDesc(temperature)).append("\n");
+        } catch (Exception e) {
+            // WorldGenerator may not be available
+        }
+        
+        // Show region name if available
+        try {
+            String regionName = world.getRegionName(tooltipGridX, tooltipGridY);
+            if (regionName != null && !regionName.equals("Unknown")) {
+                sb.append("🗺 Region: ").append(regionName).append("\n");
+            }
+        } catch (Exception e) {
+            // WorldGenerator may not be available
+        }
+        
+        if (terrain.isSnow(tooltipGridX, tooltipGridY)) {
+            sb.append("❄ Snow Cover: Yes\n");
+        }
+        
+        MapStructure struct = world.getStructureAt(tooltipGridX, tooltipGridY);
+        if (struct != null) {
+            sb.append("━━━━━━━━━━━━━━━━━━━━\n");
+            sb.append("🏛 Structure: ").append(struct.getName()).append("\n");
+            sb.append("📝 Type: ").append(struct.getType()).append("\n");
+            if (struct.getPopulation() > 0) {
+                sb.append("👥 Population: ").append(String.format("%,.0f", struct.getPopulation())).append("\n");
+            }
+        }
+        
+        // Render tooltip
+        String[] lines = sb.toString().split("\n");
+        int tooltipWidth = 200;
+        int lineHeight = 16;
+        int tooltipHeight = lines.length * lineHeight + 12;
+        
+        double tx = tooltipScreenX + 15;
+        double ty = tooltipScreenY + 15;
+        if (tx + tooltipWidth > canvas.getWidth()) tx = tooltipScreenX - tooltipWidth - 5;
+        if (ty + tooltipHeight > canvas.getHeight()) ty = tooltipScreenY - tooltipHeight - 5;
+        
+        // Tooltip background with gradient effect
+        gc.setFill(Color.web("rgba(15, 15, 25, 0.95)"));
+        gc.fillRoundRect(tx, ty, tooltipWidth, tooltipHeight, 8, 8);
+        gc.setStroke(TOOLTIP_BORDER);
+        gc.setLineWidth(2);
+        gc.strokeRoundRect(tx, ty, tooltipWidth, tooltipHeight, 8, 8);
+        
+        // Header highlight
+        gc.setFill(Color.web("rgba(74, 158, 255, 0.15)"));
+        gc.fillRoundRect(tx + 2, ty + 2, tooltipWidth - 4, lineHeight + 4, 6, 6);
+        
+        gc.setFill(TEXT_COLOR);
+        gc.setFont(new Font("Arial", 11));
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            // Highlight header
+            if (i == 0) {
+                gc.setFill(Color.web(TOOLTIP_BORDER.toString()));
+            } else if (line.startsWith("━")) {
+                gc.setFill(Color.web("#555555"));
+            } else {
+                gc.setFill(TEXT_COLOR);
+            }
+            gc.fillText(line, tx + 10, ty + 14 + i * lineHeight);
+        }
+    }
+    
+    private String formatWaterType(WaterType wt) {
+        switch (wt) {
+            case FRESH_LAKE: return "Fresh Lake";
+            case OCEAN_SHALLOW: return "Shallow Ocean";
+            case OCEAN: return "Ocean";
+            case OCEAN_DEEP: return "Deep Ocean";
+            default: return wt.name();
+        }
+    }
+    
+    private String getTemperatureDesc(double temp) {
+        if (temp < 0.15) return "Freezing";
+        if (temp < 0.30) return "Cold";
+        if (temp < 0.45) return "Cool";
+        if (temp < 0.55) return "Moderate";
+        if (temp < 0.70) return "Warm";
+        if (temp < 0.85) return "Hot";
+        return "Scorching";
+    }
+    
+    private void renderMapInfo(double width) {
+        String info = String.format("Mode: %s | Zoom: %.0f%% | Structures: %d",
+            mapMode, zoom * 100, world.getStructures().size());
+        gc.setFill(TEXT_COLOR);
+        gc.setFont(new Font("Arial", 12));
+        gc.fillText(info, 10, 20);
+    }
+    
+    // ==================== Coordinate Conversion ====================
+    
+    private double[] gridToScreen(int gridX, int gridY) {
+        return new double[]{
+            gridX * GRID_SIZE * zoom + offsetX,
+            gridY * GRID_SIZE * zoom + offsetY
+        };
+    }
+    
+    private int[] screenToGrid(double screenX, double screenY) {
+        // Use round instead of floor for more accurate center-based selection
+        return new int[]{
+            (int) Math.round((screenX - offsetX) / (GRID_SIZE * zoom) - 0.5),
+            (int) Math.round((screenY - offsetY) / (GRID_SIZE * zoom) - 0.5)
+        };
+    }
+    
+    private boolean isValidGridPosition(int x, int y) {
+        return x >= 0 && x < world.getMapWidth() && y >= 0 && y < world.getMapHeight();
+    }
+    
+    // ==================== Utility Methods ====================
+    
+    private double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
+    
+    // ==================== Public API ====================
+    
+    public void setMapMode(String mode) {
+        this.mapMode = mode;
+        render();
+    }
+    
+    public void setMapFilter(MapFilter filter) {
+        this.currentFilter = filter;
+        render();
+    }
+    
+    public void setGridBrightness(double factor) {
+        this.gridBrightness = clamp(factor, 0.3, 2.0);
+        render();
+    }
+    
+    public void toggleGridNumbers() {
+        this.showGridNumbers = !this.showGridNumbers;
+        render();
+    }
+    
+    public void zoomIn() {
+        adjustZoom(1.1);
+    }
+    
+    public void zoomOut() {
+        adjustZoom(0.9);
+    }
+    
+    public void fitToView() {
+        offsetX = 0;
+        offsetY = 0;
+        zoom = 1.0;
+        render();
+    }
+    
+    private void adjustZoom(double factor) {
+        double oldZoom = zoom;
+        zoom = clamp(zoom * factor, MIN_ZOOM, MAX_ZOOM);
+        double centerX = canvas.getWidth() / 2;
+        double centerY = canvas.getHeight() / 2;
+        offsetX = centerX - (centerX - offsetX) * (zoom / oldZoom);
+        offsetY = centerY - (centerY - offsetY) * (zoom / oldZoom);
+        render();
+    }
+    
+    public void onStageReady() {
+        render();
+    }
+    
+    public Canvas getCanvas() {
+        return canvas;
+    }
+    
+    public DemoWorld getWorld() {
+        return world;
+    }
+    
+    // View state getters for save/load
+    public int getViewX() {
+        int[] gridPos = screenToGrid(canvas.getWidth() / 2, canvas.getHeight() / 2);
+        return gridPos[0];
+    }
+    
+    public int getViewY() {
+        int[] gridPos = screenToGrid(canvas.getWidth() / 2, canvas.getHeight() / 2);
+        return gridPos[1];
+    }
+    
+    public double getZoom() {
+        return zoom;
+    }
+    
+    // View state setters for save/load
+    public void setView(int centerX, int centerY, double zoom) {
+        this.zoom = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+        this.offsetX = canvas.getWidth() / 2 - centerX * GRID_SIZE * this.zoom;
+        this.offsetY = canvas.getHeight() / 2 - centerY * GRID_SIZE * this.zoom;
+        render();
+    }
+}
