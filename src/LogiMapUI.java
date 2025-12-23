@@ -9,11 +9,11 @@ import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
-import javafx.scene.shape.Rectangle;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
@@ -31,11 +31,13 @@ public class LogiMapUI extends Application {
     private NewsTicker newsTicker;
     private InteractionMenu interactionMenu;
     private VBox menuPanel; // The sliding menu panel
+    private VBox menuContentArea; // The area for menu content (can be swapped)
     private Button toggleMenuButton;
     private boolean menuVisible = true;
     private boolean isAnimating = false;
     private static final double MENU_WIDTH = 270;
     private static final double ANIMATION_DURATION = 300;
+    private Stage primaryStage; // Reference to main window
     
     // World data
     private DemoWorld world;
@@ -44,9 +46,17 @@ public class LogiMapUI extends Application {
     // Player and gameplay
     private PlayerSprite player;
     private TownInteractionMenu townInteractionMenu;
+    private MarketplaceUI marketplaceUI;
+    private EconomySystem economySystem;
     private LoreDialogue loreDialogue;
     private AnimationTimer gameLoop;
     private long lastUpdateTime = 0;
+    
+    // Floating panels layer for draggable windows
+    private Pane floatingPanelLayer;
+    private FloatingPanel characterFloatingPanel;
+    private FloatingPanel gearFloatingPanel;
+    private FloatingPanel inventoryFloatingPanel;
     
     // Callback for returning to main menu
     private Runnable onReturnToMenu;
@@ -81,6 +91,7 @@ public class LogiMapUI extends Application {
     
     @Override
     public void start(Stage primaryStage) {
+        this.primaryStage = primaryStage; // Store reference
         mainLayout = new BorderPane();
         mainLayout.setStyle("-fx-background-color: " + DARK_BG + ";");
         
@@ -106,6 +117,7 @@ public class LogiMapUI extends Application {
      * Starts the UI within an existing root pane.
      */
     public void startWithRoot(Stage primaryStage, StackPane root) {
+        this.primaryStage = primaryStage; // Store reference
         mainLayout = new BorderPane();
         mainLayout.setStyle("-fx-background-color: " + DARK_BG + ";");
         
@@ -375,18 +387,41 @@ public class LogiMapUI extends Application {
         // Position on left side
         StackPane.setAlignment(menuPanel, Pos.CENTER_LEFT);
         
+        // Create economy system
+        economySystem = new EconomySystem(world.getSeed());
+        // Register all towns
+        for (Town town : world.getTowns()) {
+            economySystem.registerTown(town);
+        }
+        
+        // Create marketplace UI
+        marketplaceUI = new MarketplaceUI();
+        marketplaceUI.setOnClose(() -> {
+            // Refresh town menu when closing marketplace
+            if (townInteractionMenu.isShowing()) {
+                // Keep town menu visible
+            }
+        });
+        marketplaceUI.setOnReturnToTown(() -> {
+            // Return to town interaction menu
+            Town town = marketplaceUI.getCurrentTown();
+            if (town != null && player != null) {
+                townInteractionMenu.showForTown(town, player);
+            }
+        });
+        
         // Create town interaction menu
         townInteractionMenu = new TownInteractionMenu();
         townInteractionMenu.setOnTrade(() -> {
-            System.out.println("Opening marketplace...");
-            // TODO: Implement marketplace
+            // Open marketplace
+            Town town = townInteractionMenu.getCurrentTown();
+            if (town != null) {
+                townInteractionMenu.close();
+                marketplaceUI.show(town, player, economySystem);
+            }
         });
         townInteractionMenu.setOnRest(() -> {
-            if (player != null && player.getGold() >= 10) {
-                player.addGold(-10);
-                player.setHealth(player.getMaxHealth());
-                System.out.println("Rested at inn. Health restored!");
-            }
+            handleResting();
         });
         townInteractionMenu.setOnRecruit(() -> {
             System.out.println("Opening recruitment...");
@@ -400,9 +435,20 @@ public class LogiMapUI extends Application {
         // Create lore dialogue for story interactions
         loreDialogue = new LoreDialogue();
         
+        // Create floating panel layer for draggable windows (inventory, gear, etc.)
+        floatingPanelLayer = new Pane();
+        floatingPanelLayer.setPickOnBounds(false); // Let clicks pass through empty areas
+        floatingPanelLayer.setMouseTransparent(false);
+        
+        // Initialize drag overlay system for ghost sprites when dragging items
+        DragOverlay.initialize(floatingPanelLayer);
+        
+        // Initialize floating panels (hidden by default)
+        initializeFloatingPanels();
+        
         // Add to the center stack (overlays the map)
-        // Order matters: menu panel, town interaction, then lore dialogue on top
-        centerStack.getChildren().addAll(menuPanel, townInteractionMenu, loreDialogue);
+        // Order matters: menu panel, town interaction, marketplace, lore dialogue, then floating panels on top
+        centerStack.getChildren().addAll(menuPanel, townInteractionMenu, marketplaceUI, loreDialogue, floatingPanelLayer);
     }
     
     /**
@@ -421,9 +467,9 @@ public class LogiMapUI extends Application {
         contentWithToggle.setPickOnBounds(false);
         
         // Left side: the actual menu content
-        VBox menuContent = new VBox(0);
-        menuContent.setPrefWidth(MENU_WIDTH);
-        menuContent.setMaxWidth(MENU_WIDTH);
+        menuContentArea = new VBox(0);
+        menuContentArea.setPrefWidth(MENU_WIDTH);
+        menuContentArea.setMaxWidth(MENU_WIDTH);
         
         // Header with title
         HBox header = new HBox();
@@ -460,7 +506,7 @@ public class LogiMapUI extends Application {
         interactionContainer.setMaxWidth(MENU_WIDTH);
         VBox.setVgrow(interactionContainer, Priority.ALWAYS);
         
-        menuContent.getChildren().addAll(header, interactionContainer);
+        menuContentArea.getChildren().addAll(header, interactionContainer);
         
         // Right side: toggle button
         toggleMenuButton = new Button("◀");
@@ -486,7 +532,7 @@ public class LogiMapUI extends Application {
         toggleWrapper.setPadding(new Insets(50, 0, 0, 0));
         toggleWrapper.setPickOnBounds(false);
         
-        contentWithToggle.getChildren().addAll(menuContent, toggleWrapper);
+        contentWithToggle.getChildren().addAll(menuContentArea, toggleWrapper);
         panel.getChildren().add(contentWithToggle);
         
         return panel;
@@ -720,102 +766,196 @@ public class LogiMapUI extends Application {
     // Character Sheet UI reference
     private CharacterSheet characterSheetUI;
     private GearSheet gearSheetUI;
+    private VBox activeSidePanel; // Currently shown side panel content
 
     /**
-     * Opens the character sheet window (stats and attributes).
+     * Initializes floating panels for character, gear, and inventory.
      */
-    private void openCharacterSheet() {
+    private void initializeFloatingPanels() {
         if (player == null) return;
         
-        if (characterSheetUI == null) {
-            characterSheetUI = new CharacterSheet(player);
-            characterSheetUI.setOnClose(() -> characterSheetUI.setVisible(false));
+        // Character sheet floating panel
+        characterSheetUI = new CharacterSheet(player);
+        characterFloatingPanel = new FloatingPanel("Character", characterSheetUI);
+        characterFloatingPanel.setVisible(false);
+        characterFloatingPanel.setLayoutX(100);
+        characterFloatingPanel.setLayoutY(100);
+        floatingPanelLayer.getChildren().add(characterFloatingPanel);
+        
+        // Gear sheet floating panel
+        gearSheetUI = new GearSheet(player);
+        gearSheetUI.setOnGearChanged(() -> {
+            if (characterSheetUI != null) characterSheetUI.refresh();
+        });
+        gearFloatingPanel = new FloatingPanel("Equipment", gearSheetUI);
+        gearFloatingPanel.setVisible(false);
+        gearFloatingPanel.setLayoutX(350);
+        gearFloatingPanel.setLayoutY(100);
+        floatingPanelLayer.getChildren().add(gearFloatingPanel);
+        
+        // Inventory floating panel
+        inventoryUI = new InventoryUI(player.getInventory(), player);
+        inventoryUI.setOnItemEquipped(item -> {
+            // Refresh gear when item is equipped
+            if (gearSheetUI != null) gearSheetUI.refresh();
+            if (characterSheetUI != null) characterSheetUI.refresh();
+        });
+        inventoryFloatingPanel = new FloatingPanel("Inventory", inventoryUI);
+        inventoryFloatingPanel.setVisible(false);
+        inventoryFloatingPanel.setLayoutX(620);
+        inventoryFloatingPanel.setLayoutY(100);
+        floatingPanelLayer.getChildren().add(inventoryFloatingPanel);
+    }
+
+    /**
+     * Opens the character sheet as a floating panel.
+     */
+    private void openCharacterSheet() {
+        if (player == null || characterFloatingPanel == null) return;
+        
+        if (characterFloatingPanel.isShowing()) {
+            // Toggle off - hide the panel
+            characterFloatingPanel.hide();
+        } else {
+            characterSheetUI.refresh();
+            characterFloatingPanel.show();
         }
-        
-        // Update and show
-        characterSheetUI.refresh();
-        
-        if (!centerStack.getChildren().contains(characterSheetUI)) {
-            centerStack.getChildren().add(characterSheetUI);
-        }
-        
-        // Position to the left of center
-        double x = (centerStack.getWidth() - characterSheetUI.getPrefWidth()) / 2 - 150;
-        double y = (centerStack.getHeight() - characterSheetUI.getPrefHeight()) / 2;
-        characterSheetUI.setLayoutX(Math.max(10, x));
-        characterSheetUI.setLayoutY(Math.max(10, y));
-        
-        characterSheetUI.setVisible(true);
-        characterSheetUI.toFront();
     }
     
     /**
-     * Opens the gear/equipment sheet window.
+     * Opens the gear/equipment sheet as a floating panel.
      */
     private void openGearSheet() {
-        if (player == null) return;
+        if (player == null || gearFloatingPanel == null) return;
         
-        if (gearSheetUI == null) {
-            gearSheetUI = new GearSheet(player);
-            gearSheetUI.setOnClose(() -> gearSheetUI.setVisible(false));
-            gearSheetUI.setOnGearChanged(() -> {
-                if (characterSheetUI != null) characterSheetUI.refresh();
-            });
+        if (gearFloatingPanel.isShowing()) {
+            // Toggle off - hide the panel
+            gearFloatingPanel.hide();
+        } else {
+            gearSheetUI.refresh();
+            gearFloatingPanel.show();
         }
-        
-        // Update and show
-        gearSheetUI.refresh();
-        
-        if (!centerStack.getChildren().contains(gearSheetUI)) {
-            centerStack.getChildren().add(gearSheetUI);
-        }
-        
-        // Position to the right of center
-        double x = (centerStack.getWidth() - gearSheetUI.getPrefWidth()) / 2 + 150;
-        double y = (centerStack.getHeight() - gearSheetUI.getPrefHeight()) / 2;
-        gearSheetUI.setLayoutX(Math.max(10, x));
-        gearSheetUI.setLayoutY(Math.max(10, y));
-        
-        gearSheetUI.setVisible(true);
-        gearSheetUI.toFront();
     }
 
-    // Inventory UI reference
-    private InventoryUI inventoryUI;
-    private DraggableWindow inventoryWindow;
-
     /**
-     * Opens the inventory window.
+     * Opens the inventory as a floating panel.
      */
     private void openInventory() {
-        if (player == null) return;
+        if (player == null || inventoryFloatingPanel == null) return;
         
-        if (inventoryWindow == null) {
-            inventoryUI = new InventoryUI(player.getInventory());
-            inventoryUI.setOnClose(() -> inventoryWindow.setVisible(false));
-            
-            // Wrap in draggable window
-            inventoryWindow = new DraggableWindow("🎒 Inventory", 
-                inventoryUI.getPrefWidth() + 20, inventoryUI.getPrefHeight() + 50);
-            inventoryWindow.setContent(inventoryUI);
-            inventoryWindow.setOnClose(() -> inventoryWindow.setVisible(false));
+        if (inventoryFloatingPanel.isShowing()) {
+            // Toggle off - hide the panel
+            inventoryFloatingPanel.hide();
+        } else {
+            inventoryUI.refresh();
+            inventoryFloatingPanel.show();
+        }
+    }
+    
+    // Inventory UI reference (moved to floating panels)
+    private InventoryUI inventoryUI;
+    
+    /**
+     * Shows a panel in the side menu area, replacing the interaction menu.
+     */
+    private void showInSidePanel(VBox panel) {
+        // Store the active panel
+        activeSidePanel = panel;
+        
+        // Make sure menu is visible
+        if (!menuVisible) {
+            toggleMenu();
         }
         
-        // Refresh and show
-        inventoryUI.refresh();
+        // Replace the content area (not the whole menu structure)
+        menuContentArea.getChildren().clear();
         
-        if (!centerStack.getChildren().contains(inventoryWindow)) {
-            centerStack.getChildren().add(inventoryWindow);
-        }
+        // Create header for the side panel
+        HBox header = new HBox();
+        header.setAlignment(Pos.CENTER_LEFT);
+        header.setPadding(new Insets(8, 10, 8, 10));
+        header.setMinHeight(42);
+        header.setStyle(
+            "-fx-background-color: linear-gradient(to bottom, #3d2f1f, " + MENU_HEADER + ");" +
+            "-fx-border-color: " + MENU_BORDER + ";" +
+            "-fx-border-width: 3 3 0 0;" +
+            "-fx-border-radius: 0 12 0 0;" +
+            "-fx-background-radius: 0 12 0 0;"
+        );
         
-        // Position below center
-        double x = (centerStack.getWidth() - inventoryWindow.getPrefWidth()) / 2;
-        double y = (centerStack.getHeight() - inventoryWindow.getPrefHeight()) / 2 + 100;
-        inventoryWindow.setLayoutX(Math.max(10, x));
-        inventoryWindow.setLayoutY(Math.max(10, y));
+        // Back button
+        Button backBtn = new Button("← Back");
+        backBtn.setStyle(
+            "-fx-background-color: #2a1f10;" +
+            "-fx-text-fill: #c4a574;" +
+            "-fx-font-size: 11px;" +
+            "-fx-padding: 5 10;" +
+            "-fx-cursor: hand;" +
+            "-fx-background-radius: 4;"
+        );
+        backBtn.setOnAction(e -> closeSidePanel());
+        header.getChildren().add(backBtn);
         
-        inventoryWindow.setVisible(true);
-        inventoryWindow.toFront();
+        // Content wrapper
+        VBox contentWrapper = new VBox(0);
+        contentWrapper.setStyle(
+            "-fx-background-color: linear-gradient(to bottom, " + MENU_BG + ", #1f1a10);" +
+            "-fx-border-color: " + MENU_BORDER + ";" +
+            "-fx-border-width: 0 3 3 0;" +
+            "-fx-border-radius: 0 0 12 0;" +
+            "-fx-background-radius: 0 0 12 0;" +
+            "-fx-padding: 5;"
+        );
+        contentWrapper.getChildren().add(panel);
+        VBox.setVgrow(panel, Priority.ALWAYS);
+        VBox.setVgrow(contentWrapper, Priority.ALWAYS);
+        
+        menuContentArea.getChildren().addAll(header, contentWrapper);
+    }
+    
+    /**
+     * Closes the side panel and returns to the interaction menu.
+     */
+    private void closeSidePanel() {
+        activeSidePanel = null;
+        
+        // Restore the original menu content
+        menuContentArea.getChildren().clear();
+        
+        // Recreate the header
+        HBox header = new HBox();
+        header.setAlignment(Pos.CENTER);
+        header.setPadding(new Insets(10, 15, 10, 15));
+        header.setMinHeight(42);
+        header.setStyle(
+            "-fx-background-color: linear-gradient(to bottom, #3d2f1f, " + MENU_HEADER + ");" +
+            "-fx-border-color: " + MENU_BORDER + ";" +
+            "-fx-border-width: 3 3 0 0;" +
+            "-fx-border-radius: 0 12 0 0;" +
+            "-fx-background-radius: 0 12 0 0;"
+        );
+        
+        Label titleLabel = new Label("⚔  CONTROLS  ⚔");
+        titleLabel.setStyle(
+            "-fx-text-fill: #c4a574;" +
+            "-fx-font-size: 13px;" +
+            "-fx-font-weight: bold;"
+        );
+        header.getChildren().add(titleLabel);
+        
+        // Restore the interaction menu container
+        VBox interactionContainer = interactionMenu.getContainer();
+        interactionContainer.setStyle(
+            "-fx-background-color: linear-gradient(to bottom, " + MENU_BG + ", #1f1a10);" +
+            "-fx-border-color: " + MENU_BORDER + ";" +
+            "-fx-border-width: 0 3 3 0;" +
+            "-fx-border-radius: 0 0 12 0;" +
+            "-fx-background-radius: 0 0 12 0;" +
+            "-fx-padding: 5 0 10 0;"
+        );
+        VBox.setVgrow(interactionContainer, Priority.ALWAYS);
+        
+        menuContentArea.getChildren().addAll(header, interactionContainer);
     }
     
     /**
@@ -856,6 +996,75 @@ public class LogiMapUI extends Application {
      */
     public void setOnReturnToMenu(Runnable callback) {
         this.onReturnToMenu = callback;
+    }
+    
+    /**
+     * Handles resting at a town.
+     * Free in villages, costs gold in cities.
+     * Restores energy and progresses time.
+     */
+    private void handleResting() {
+        if (player == null || mapCanvas == null) return;
+        
+        Town town = townInteractionMenu.getCurrentTown();
+        if (town == null) return;
+        
+        PlayerEnergy energy = mapCanvas.getPlayerEnergy();
+        GameTime gameTime = mapCanvas.getGameTime();
+        
+        if (energy == null || gameTime == null) return;
+        
+        // Check if already at full energy
+        if (energy.getCurrentEnergy() >= energy.getMaxEnergy()) {
+            newsTicker.addNewsItem("You are already fully rested!");
+            return;
+        }
+        
+        // Get rest location type
+        PlayerEnergy.RestLocation restLocation = town.getRestLocation();
+        int cost = restLocation.getCost();
+        
+        // Check if player can afford
+        if (cost > 0 && player.getGold() < cost) {
+            newsTicker.addNewsItem("Not enough gold! You need " + cost + " gold to rest here.");
+            return;
+        }
+        
+        // Pay cost
+        if (cost > 0) {
+            player.addGold(-cost);
+        }
+        
+        // Calculate time and energy restoration
+        if (restLocation.takesTime()) {
+            // Gradual rest - advance time and restore energy
+            double energyNeeded = energy.getMaxEnergy() - energy.getCurrentEnergy();
+            double ratePerMin = restLocation.getRecoveryPerMinute();
+            int minutesNeeded = (int) Math.ceil(energyNeeded / ratePerMin);
+            
+            // Advance game time
+            gameTime.advanceTime(minutesNeeded);
+            
+            // Restore energy
+            energy.fullyRestore();
+            
+            int hours = minutesNeeded / 60;
+            int mins = minutesNeeded % 60;
+            String timeStr = hours > 0 ? hours + " hours " + mins + " minutes" : mins + " minutes";
+            
+            if (cost > 0) {
+                newsTicker.addNewsItem("Rested at " + restLocation.getDisplayName() + " for " + timeStr + ". Energy restored! (-" + cost + " gold)");
+            } else {
+                newsTicker.addNewsItem("Rested at " + restLocation.getDisplayName() + " for " + timeStr + ". Energy restored!");
+            }
+        } else {
+            // Instant restore (city inn)
+            energy.fullyRestore();
+            newsTicker.addNewsItem("Rested at " + restLocation.getDisplayName() + ". Fully restored! (-" + cost + " gold)");
+        }
+        
+        // Close town menu
+        townInteractionMenu.close();
     }
     
     /**

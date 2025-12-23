@@ -71,6 +71,10 @@ public class WorldGenerator {
     // Points of interest for logistics
     private List<PointOfInterest> pointsOfInterest;
     
+    // Resource nodes and decorations
+    private List<ResourceNode> resourceNodes;
+    private List<TerrainDecoration> decorations;
+    
     // ==================== CONSTRUCTORS ====================
     
     public WorldGenerator(int width, int height, long seed) {
@@ -91,6 +95,8 @@ public class WorldGenerator {
         this.temperatureSeed = config.seed * 7 + 4;
         
         this.pointsOfInterest = new ArrayList<>();
+        this.resourceNodes = new ArrayList<>();
+        this.decorations = new ArrayList<>();
         
         generate();
     }
@@ -116,6 +122,12 @@ public class WorldGenerator {
         System.out.println("  - Generating points of interest...");
         System.out.flush();
         generatePointsOfInterest();
+        System.out.println("  - Generating resource nodes...");
+        System.out.flush();
+        generateResourceNodes();
+        System.out.println("  - Generating terrain decorations...");
+        System.out.flush();
+        generateTerrainDecorations();
         
         System.out.println("WorldGenerator: Generation complete!");
         System.out.flush();
@@ -580,6 +592,177 @@ public class WorldGenerator {
         }
     }
     
+    // ==================== RESOURCE NODE GENERATION ====================
+    
+    private void generateResourceNodes() {
+        resourceNodes.clear();
+        Random nodeRand = new Random(config.seed + 7777);
+        
+        // Generate grain fields on plains/meadow/grass
+        int grainNodeCount = (width * height) / 8000; // Roughly 1 node per 8000 tiles
+        for (int i = 0; i < grainNodeCount; i++) {
+            int attempts = 0;
+            while (attempts < 50) {
+                int x = nodeRand.nextInt(width - 40) + 20;
+                int y = nodeRand.nextInt(height - 40) + 20;
+                TerrainType t = terrain[x][y];
+                
+                if (ResourceNode.Type.GRAIN.canSpawnOn(t)) {
+                    // Check not too close to other nodes
+                    boolean tooClose = false;
+                    for (ResourceNode existing : resourceNodes) {
+                        int dx = existing.getCenterX() - x;
+                        int dy = existing.getCenterY() - y;
+                        if (dx * dx + dy * dy < 2500) { // 50 tile min distance
+                            tooClose = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!tooClose) {
+                        int radius = 8 + nodeRand.nextInt(12); // 8-20 tile radius
+                        GrainType grainType = GrainType.randomWeighted(nodeRand);
+                        resourceNodes.add(new ResourceNode(x, y, radius, ResourceNode.Type.GRAIN, 
+                                                          grainType, config.seed + i * 100));
+                        break;
+                    }
+                }
+                attempts++;
+            }
+        }
+    }
+    
+    // ==================== TERRAIN DECORATION GENERATION ====================
+    
+    private void generateTerrainDecorations() {
+        decorations.clear();
+        Random decRand = new Random(config.seed + 8888);
+        
+        // Decoration density varies by biome
+        int step = 3; // Check every 3rd tile for performance
+        
+        for (int x = step; x < width - step; x += step) {
+            for (int y = step; y < height - step; y += step) {
+                TerrainType t = terrain[x][y];
+                if (t.isWater()) continue;
+                
+                // Skip if inside a resource node
+                boolean inNode = false;
+                for (ResourceNode node : resourceNodes) {
+                    if (node.contains(x, y)) {
+                        inNode = true;
+                        break;
+                    }
+                }
+                if (inNode) continue;
+                
+                // Determine decoration chance by terrain
+                double chance = getDecorationChance(t);
+                
+                if (decRand.nextDouble() < chance) {
+                    // Choose category based on biome
+                    TerrainDecoration.Category cat = chooseDecorationCategory(t, decRand);
+                    if (cat != null) {
+                        int variant = decRand.nextInt(10);
+                        double size = 0.3 + decRand.nextDouble() * 0.5;
+                        double rotation = decRand.nextDouble() * 20 - 10;
+                        
+                        // Add small random offset
+                        double ox = decRand.nextDouble() * step - step / 2.0;
+                        double oy = decRand.nextDouble() * step - step / 2.0;
+                        
+                        decorations.add(new TerrainDecoration(
+                            (int)(x + ox), (int)(y + oy), cat, variant, size, rotation
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    
+    private double getDecorationChance(TerrainType t) {
+        switch (t) {
+            case FOREST:
+            case DENSE_FOREST:
+            case JUNGLE:
+                return 0.5; // Dense decorations
+            case TAIGA:
+                return 0.4;
+            case GRASS:
+            case MEADOW:
+            case PLAINS:
+                return 0.25;
+            case SAVANNA:
+            case SCRUBLAND:
+                return 0.15;
+            case HILLS:
+            case ROCKY_HILLS:
+                return 0.2;
+            case MOUNTAIN:
+                return 0.1;
+            case DESERT:
+            case DUNES:
+                return 0.08;
+            case BEACH:
+                return 0.05;
+            default:
+                return 0.1;
+        }
+    }
+    
+    private TerrainDecoration.Category chooseDecorationCategory(TerrainType t, Random rand) {
+        // Weight categories by terrain type
+        switch (t) {
+            case FOREST:
+            case DENSE_FOREST:
+            case TAIGA:
+            case JUNGLE:
+                // Mostly trees, some grass/rocks
+                double r = rand.nextDouble();
+                if (r < 0.65) return TerrainDecoration.Category.TREE;
+                if (r < 0.85) return TerrainDecoration.Category.GRASS;
+                return TerrainDecoration.Category.ROCK;
+                
+            case GRASS:
+            case MEADOW:
+            case PLAINS:
+                // Mostly grass, few trees/rocks
+                r = rand.nextDouble();
+                if (r < 0.7) return TerrainDecoration.Category.GRASS;
+                if (r < 0.85) return TerrainDecoration.Category.TREE;
+                return TerrainDecoration.Category.ROCK;
+                
+            case SAVANNA:
+            case SCRUBLAND:
+                r = rand.nextDouble();
+                if (r < 0.5) return TerrainDecoration.Category.GRASS;
+                if (r < 0.75) return TerrainDecoration.Category.TREE;
+                return TerrainDecoration.Category.ROCK;
+                
+            case HILLS:
+            case ROCKY_HILLS:
+            case MOUNTAIN:
+                r = rand.nextDouble();
+                if (r < 0.6) return TerrainDecoration.Category.ROCK;
+                if (r < 0.85) return TerrainDecoration.Category.GRASS;
+                return null;
+                
+            case DESERT:
+            case DUNES:
+                r = rand.nextDouble();
+                if (r < 0.7) return TerrainDecoration.Category.ROCK;
+                return TerrainDecoration.Category.GRASS;
+                
+            case BEACH:
+                r = rand.nextDouble();
+                if (r < 0.6) return TerrainDecoration.Category.ROCK;
+                return TerrainDecoration.Category.GRASS;
+                
+            default:
+                return TerrainDecoration.Category.GRASS;
+        }
+    }
+    
     // ==================== PUBLIC GETTERS ====================
     
     public TerrainType[][] getTerrain() { return terrain; }
@@ -589,6 +772,8 @@ public class WorldGenerator {
     public double[][] getMoisture() { return moisture; }
     public double[][] getTemperature() { return temperature; }
     public List<PointOfInterest> getPointsOfInterest() { return pointsOfInterest; }
+    public List<ResourceNode> getResourceNodes() { return resourceNodes; }
+    public List<TerrainDecoration> getDecorations() { return decorations; }
     public int getWidth() { return width; }
     public int getHeight() { return height; }
     public WorldConfig getConfig() { return config; }

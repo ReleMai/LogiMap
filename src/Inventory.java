@@ -67,7 +67,7 @@ public class Inventory {
         
         // First, try to merge with existing stacks of the same item
         if (remaining.getItem().isStackable()) {
-            for (int i = 0; i < slots.length && !remaining.isEmpty(); i++) {
+            for (int i = 0; i < slots.length && remaining != null && !remaining.isEmpty(); i++) {
                 if (slots[i] != null && slots[i].canMergeWith(remaining)) {
                     remaining = slots[i].merge(remaining);
                     notifySlotChanged(i);

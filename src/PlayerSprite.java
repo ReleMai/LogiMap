@@ -260,20 +260,19 @@ public class PlayerSprite {
     }
     
     /**
-     * Renders a cleaner player sprite with modular body parts.
-     * All body parts are tightly connected with no gaps.
+     * Renders a clean player sprite with connected body parts.
      */
     public void render(GraphicsContext gc, double screenX, double screenY, double size) {
         double centerX = screenX + size / 2;
-        double bottomY = screenY + size;
+        double bottomY = screenY + size * 0.95; // Slight offset from bottom
         
         // Walking animation
         double bobOffset = 0;
         double legSwing = 0;
         double armSwing = 0;
         if (isMoving) {
-            bobOffset = Math.sin(animationTime * 10) * size * 0.02;
-            legSwing = Math.sin(animationTime * 8) * 12;
+            bobOffset = Math.sin(animationTime * 10) * size * 0.015;
+            legSwing = Math.sin(animationTime * 8) * 10;
             armSwing = Math.sin(animationTime * 8 + Math.PI) * 8;
         }
         
@@ -283,86 +282,74 @@ public class PlayerSprite {
         gc.translate(centerX, bottomY + bobOffset);
         gc.scale(scaleX, 1);
         
-        // Proportional sizing - all based on size for proper scaling
-        double headSize = size * 0.35;      // Head diameter
-        double torsoW = size * 0.32;        // Torso width
-        double torsoH = size * 0.28;        // Torso height
-        double legW = size * 0.12;          // Leg width
-        double legH = size * 0.30;          // Leg height
-        double armW = size * 0.10;          // Arm width
-        double armH = size * 0.28;          // Arm height
+        // Unit-based proportions for a chibi-style character
+        double unit = size / 12.0;
         
-        // Calculate Y positions from bottom up (no gaps!)
-        double footY = 0;                            // Ground level
-        double legTopY = -legH;                      // Top of legs
-        double torsoBottomY = legTopY;               // Torso connects to legs
-        double torsoTopY = torsoBottomY - torsoH;    // Top of torso
-        double neckY = torsoTopY;                    // Neck connects to torso
-        double headCenterY = neckY - headSize * 0.35; // Head center (overlaps slightly)
+        // Body dimensions
+        double headR = unit * 2.2;       // Head radius
+        double bodyW = unit * 3.0;       // Body width  
+        double bodyH = unit * 2.8;       // Body height
+        double legW = unit * 1.1;        // Leg width
+        double legH = unit * 2.5;        // Leg height
+        double armW = unit * 0.9;        // Arm width
+        double armH = unit * 2.2;        // Arm height
+        
+        // Y positions (from feet up)
+        double legsBottom = 0;
+        double legsTop = -legH;
+        double bodyBottom = legsTop + unit * 0.3; // Overlap with legs
+        double bodyTop = bodyBottom - bodyH;
+        double headCenter = bodyTop - headR * 0.6; // Head overlaps body slightly
         
         // Shadow
-        gc.setFill(Color.color(0, 0, 0, 0.3));
-        gc.fillOval(-size * 0.15, -size * 0.03, size * 0.30, size * 0.08);
+        gc.setFill(Color.color(0, 0, 0, 0.25));
+        gc.fillOval(-unit * 1.5, -unit * 0.3, unit * 3, unit * 0.8);
         
-        // === BACK LAYER ===
-        
-        // Cape (behind everything)
+        // === CAPE (back layer) ===
         if (cape != null) {
-            cape.renderCape(gc, -torsoW * 0.6, torsoTopY, torsoW * 1.2, torsoH + legH * 0.7);
+            cape.renderCape(gc, -bodyW * 0.55, bodyTop, bodyW * 1.1, bodyH + legH * 0.5);
         }
         
-        // Left arm (behind body)
+        // === LEFT ARM (behind body) ===
         gc.save();
-        double leftArmX = -torsoW / 2 - armW * 0.3;
-        gc.translate(leftArmX, torsoTopY + armH * 0.1);
+        gc.translate(-bodyW / 2 - armW * 0.2, bodyTop + unit * 0.3);
         if (isMoving) gc.rotate(armSwing);
         renderArm(gc, bodyParts.get(BodyPart.Type.LEFT_ARM), armW, armH, false);
         gc.restore();
         
         // === LEGS ===
-        double legSpacing = legW * 0.7;
+        double legGap = unit * 0.3;
         
         // Left leg
         gc.save();
-        gc.translate(-legSpacing, legTopY);
+        gc.translate(-legGap, legsTop);
         if (isMoving) gc.rotate(legSwing);
         renderLeg(gc, bodyParts.get(BodyPart.Type.LEFT_LEG), legW, legH);
         gc.restore();
         
         // Right leg
         gc.save();
-        gc.translate(legSpacing, legTopY);
+        gc.translate(legGap, legsTop);
         if (isMoving) gc.rotate(-legSwing);
         renderLeg(gc, bodyParts.get(BodyPart.Type.RIGHT_LEG), legW, legH);
         gc.restore();
         
-        // === TORSO ===
-        renderTorso(gc, bodyParts.get(BodyPart.Type.CHEST), 
-                   -torsoW / 2, torsoTopY, torsoW, torsoH);
+        // === BODY ===
+        renderTorso(gc, bodyParts.get(BodyPart.Type.CHEST), -bodyW / 2, bodyTop, bodyW, bodyH);
         
-        // === FRONT LAYER ===
-        
-        // Right arm (in front)
+        // === RIGHT ARM (in front) ===
         gc.save();
-        double rightArmX = torsoW / 2 - armW * 0.7;
-        gc.translate(rightArmX, torsoTopY + armH * 0.1);
+        gc.translate(bodyW / 2 - armW * 0.3, bodyTop + unit * 0.3);
         if (isMoving) gc.rotate(-armSwing);
         renderArm(gc, bodyParts.get(BodyPart.Type.RIGHT_ARM), armW, armH, true);
         gc.restore();
         
         // === HEAD ===
-        renderHead(gc, bodyParts.get(BodyPart.Type.HEAD), headCenterY, headSize / 2);
+        renderHead(gc, bodyParts.get(BodyPart.Type.HEAD), headCenter, headR);
         
         gc.restore();
         
-        // Name above sprite
-        gc.setFill(Color.WHITE);
-        gc.setFont(javafx.scene.text.Font.font("Arial", javafx.scene.text.FontWeight.BOLD, 
-                   Math.max(10, size * 0.13)));
-        javafx.scene.text.Text tempText = new javafx.scene.text.Text(name);
-        tempText.setFont(gc.getFont());
-        double textWidth = tempText.getLayoutBounds().getWidth();
-        gc.fillText(name, screenX + size / 2 - textWidth / 2, screenY - size * 0.05);
+        // No name rendering - removed as requested
     }
     
     /**
@@ -380,10 +367,20 @@ public class PlayerSprite {
         gc.fillArc(-radius * 1.02, centerY - radius * 1.05, radius * 2.04, radius * 1.5, 
                    20, 140, javafx.scene.shape.ArcType.CHORD);
         
-        // Eye
+        // Eyes - two eyes
+        gc.setFill(Color.WHITE);
+        double eyeSize = radius * 0.28;
+        double eyeY = centerY - radius * 0.1;
+        // Left eye
+        gc.fillOval(-radius * 0.35, eyeY - eyeSize/2, eyeSize, eyeSize);
+        // Right eye
+        gc.fillOval(radius * 0.1, eyeY - eyeSize/2, eyeSize, eyeSize);
+        
+        // Pupils
         gc.setFill(Color.web("#1a1a1a"));
-        double eyeSize = radius * 0.22;
-        gc.fillOval(radius * 0.2, centerY - radius * 0.15, eyeSize, eyeSize);
+        double pupilSize = eyeSize * 0.5;
+        gc.fillOval(-radius * 0.28, eyeY - pupilSize/2, pupilSize, pupilSize);
+        gc.fillOval(radius * 0.17, eyeY - pupilSize/2, pupilSize, pupilSize);
         
         // Outline
         gc.setStroke(OUTLINE_COLOR);

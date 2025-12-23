@@ -35,6 +35,7 @@ public class SettingsMenu extends StackPane {
     private Spinner<Integer> autoSaveIntervalSpinner;
     private Slider scrollSpeedSlider;
     private Slider zoomSpeedSlider;
+    private CheckBox moveToInteractCheck;
     
     public SettingsMenu() {
         this(null);
@@ -68,6 +69,7 @@ public class SettingsMenu extends StackPane {
         autoSaveIntervalSpinner.getValueFactory().setValue(settings.getAutoSaveInterval());
         scrollSpeedSlider.setValue(settings.getScrollSpeed() * 100);
         zoomSpeedSlider.setValue(settings.getZoomSpeed() * 100);
+        moveToInteractCheck.setSelected(settings.isMoveToInteract());
     }
     
     private void createContent() {
@@ -255,7 +257,15 @@ public class SettingsMenu extends StackPane {
         Label zoomValue = createValueLabel(zoomSpeedSlider, "%");
         zoomRow.getChildren().addAll(zoomLabel, zoomSpeedSlider, zoomValue);
         
-        section.getChildren().addAll(scrollRow, zoomRow);
+        // Move to Interact option
+        moveToInteractCheck = createCheckBox("Move to Interact", true);
+        Label moveToInteractHint = new Label("Right-click moves player to interactable objects");
+        moveToInteractHint.setFont(Font.font("Arial", 10));
+        moveToInteractHint.setTextFill(Color.web(TEXT_COLOR, 0.6));
+        VBox moveToInteractRow = new VBox(2);
+        moveToInteractRow.getChildren().addAll(moveToInteractCheck, moveToInteractHint);
+        
+        section.getChildren().addAll(scrollRow, zoomRow, moveToInteractRow);
         return section;
     }
     
@@ -385,6 +395,7 @@ public class SettingsMenu extends StackPane {
         settings.setAutoSaveInterval(autoSaveIntervalSpinner.getValue());
         settings.setScrollSpeed(scrollSpeedSlider.getValue() / 100.0);
         settings.setZoomSpeed(zoomSpeedSlider.getValue() / 100.0);
+        settings.setMoveToInteract(moveToInteractCheck.isSelected());
         
         // Save to file
         settings.save();

@@ -8,12 +8,12 @@ import java.util.*;
  */
 public class RoadNetwork {
     
-    private List<Road> roads;
-    private List<MapStructure> nodes;
-    private TerrainType[][] terrainMap;
-    private int width;
-    private int height;
-    private Random random;
+    private final List<Road> roads;
+    private final List<MapStructure> nodes;
+    private final TerrainType[][] terrainMap;
+    private final int width;
+    private final int height;
+    private final Random random;
     
     public RoadNetwork(TerrainType[][] terrainMap, int width, int height, long seed) {
         this.roads = new ArrayList<>();
@@ -65,8 +65,7 @@ public class RoadNetwork {
     }
     
     private boolean isMajorTown(MapStructure structure) {
-        if (structure instanceof Town) {
-            Town town = (Town) structure;
+        if (structure instanceof Town town) {
             return town.isMajor();
         }
         return false;

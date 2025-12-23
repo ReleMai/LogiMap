@@ -75,13 +75,14 @@ public class TownSprite {
      */
     public static void render(GraphicsContext gc, Town town, double x, double y, double size, boolean nearWater) {
         SettlementType type = getSettlementType(town, nearWater);
+        VillageType villageType = town.getVillageType();
         
         switch (type) {
             case VILLAGE:
-                renderVillage(gc, x, y, size);
+                renderVillageWithType(gc, x, y, size, villageType);
                 break;
             case TOWN:
-                renderTown(gc, x, y, size);
+                renderTownWithType(gc, x, y, size, villageType);
                 break;
             case CITY:
                 renderCity(gc, x, y, size);
@@ -93,6 +94,180 @@ public class TownSprite {
                 renderPortTown(gc, x, y, size);
                 break;
         }
+    }
+    
+    /**
+     * Village with village type-specific decorations.
+     */
+    private static void renderVillageWithType(GraphicsContext gc, double x, double y, double size, VillageType villageType) {
+        // Get colors from village type
+        Color roofColor = villageType != null ? Color.web(villageType.getRoofColor()) : ROOF_BROWN;
+        Color accentColor = villageType != null ? Color.web(villageType.getAccentColor()) : Color.web("#2d5016");
+        
+        double houseSize = size * 0.22;
+        double roofHeight = houseSize * 0.5;
+        
+        // Background area with accent color tint
+        gc.setFill(accentColor.deriveColor(0, 1, 1, 0.3));
+        gc.fillOval(x + size * 0.1, y + size * 0.1, size * 0.8, size * 0.8);
+        
+        // Draw 3-4 small houses
+        double[][] housePositions = {
+            {0.25, 0.25},
+            {0.55, 0.20},
+            {0.20, 0.55},
+            {0.50, 0.50}
+        };
+        
+        Color[] houseColors = {BUILDING_1, BUILDING_2, BUILDING_3, BUILDING_1};
+        
+        for (int i = 0; i < 4; i++) {
+            double hx = x + housePositions[i][0] * size;
+            double hy = y + housePositions[i][1] * size;
+            
+            // House body
+            gc.setFill(houseColors[i]);
+            gc.fillRect(hx, hy, houseSize, houseSize);
+            
+            // Roof with village type color
+            gc.setFill(roofColor);
+            gc.fillPolygon(
+                new double[]{hx - houseSize * 0.1, hx + houseSize / 2, hx + houseSize * 1.1},
+                new double[]{hy, hy - roofHeight, hy},
+                3
+            );
+            
+            // Door
+            gc.setFill(DOOR_COLOR);
+            gc.fillRect(hx + houseSize * 0.35, hy + houseSize * 0.5, houseSize * 0.3, houseSize * 0.5);
+            
+            // Window
+            if (i < 2) {
+                gc.setFill(WINDOW_COLOR);
+                gc.fillRect(hx + houseSize * 0.15, hy + houseSize * 0.2, houseSize * 0.2, houseSize * 0.2);
+            }
+        }
+        
+        // Draw village type icon/decoration in center
+        renderVillageTypeDecoration(gc, x, y, size, villageType);
+    }
+    
+    /**
+     * Renders a decoration specific to the village type.
+     */
+    private static void renderVillageTypeDecoration(GraphicsContext gc, double x, double y, double size, VillageType villageType) {
+        double centerX = x + size * 0.45;
+        double centerY = y + size * 0.43;
+        double iconSize = size * 0.15;
+        
+        if (villageType == null) {
+            // Default: tree
+            gc.setFill(Color.web("#228b22"));
+            gc.fillOval(centerX, centerY, iconSize, iconSize);
+            return;
+        }
+        
+        switch (villageType) {
+            case AGRICULTURAL:
+                // Wheat/grain icon - golden stalks
+                gc.setFill(Color.web("#daa520"));
+                // Draw wheat stalks
+                for (int i = 0; i < 3; i++) {
+                    double sx = centerX + i * iconSize * 0.4;
+                    gc.fillRect(sx, centerY + iconSize * 0.3, 2, iconSize * 0.7);
+                    gc.fillOval(sx - 2, centerY, 6, iconSize * 0.4);
+                }
+                break;
+                
+            case PASTORAL:
+                // Barn/animal icon - red barn
+                gc.setFill(Color.web("#8b2500"));
+                gc.fillRect(centerX, centerY + iconSize * 0.3, iconSize, iconSize * 0.7);
+                gc.fillPolygon(
+                    new double[]{centerX - 2, centerX + iconSize / 2, centerX + iconSize + 2},
+                    new double[]{centerY + iconSize * 0.3, centerY, centerY + iconSize * 0.3},
+                    3
+                );
+                break;
+                
+            case MINING:
+                // Pickaxe/mine icon - gray rock with pick
+                gc.setFill(Color.web("#696969"));
+                gc.fillOval(centerX, centerY + iconSize * 0.2, iconSize, iconSize * 0.8);
+                gc.setFill(Color.web("#404040"));
+                gc.fillOval(centerX + iconSize * 0.2, centerY + iconSize * 0.4, iconSize * 0.6, iconSize * 0.5);
+                break;
+                
+            case LUMBER:
+                // Tree stump/logs icon
+                gc.setFill(Color.web("#8b4513"));
+                gc.fillOval(centerX + iconSize * 0.1, centerY + iconSize * 0.4, iconSize * 0.8, iconSize * 0.6);
+                gc.setFill(Color.web("#228b22"));
+                gc.fillOval(centerX, centerY, iconSize * 0.6, iconSize * 0.5);
+                gc.fillOval(centerX + iconSize * 0.4, centerY + iconSize * 0.1, iconSize * 0.6, iconSize * 0.5);
+                break;
+                
+            case FISHING:
+                // Fish/boat icon - blue water with boat
+                gc.setFill(Color.web("#4a90c0"));
+                gc.fillOval(centerX, centerY + iconSize * 0.4, iconSize, iconSize * 0.6);
+                gc.setFill(Color.web("#8b7355"));
+                gc.fillPolygon(
+                    new double[]{centerX + iconSize * 0.2, centerX + iconSize * 0.5, centerX + iconSize * 0.8},
+                    new double[]{centerY + iconSize * 0.5, centerY + iconSize * 0.3, centerY + iconSize * 0.5},
+                    3
+                );
+                break;
+                
+            case TRADING:
+                // Market stall/coins icon
+                gc.setFill(Color.web("#ffd700"));
+                gc.fillOval(centerX, centerY + iconSize * 0.3, iconSize * 0.4, iconSize * 0.4);
+                gc.fillOval(centerX + iconSize * 0.3, centerY + iconSize * 0.4, iconSize * 0.4, iconSize * 0.4);
+                gc.fillOval(centerX + iconSize * 0.6, centerY + iconSize * 0.3, iconSize * 0.4, iconSize * 0.4);
+                break;
+                
+            default:
+                // Generic tree
+                gc.setFill(Color.web("#228b22"));
+                gc.fillOval(centerX, centerY, iconSize, iconSize);
+                break;
+        }
+    }
+    
+    /**
+     * Town with village type-specific theming.
+     */
+    private static void renderTownWithType(GraphicsContext gc, double x, double y, double size, VillageType villageType) {
+        Color roofColor = villageType != null ? Color.web(villageType.getRoofColor()) : ROOF_BROWN;
+        Color accentColor = villageType != null ? Color.web(villageType.getAccentColor()) : Color.web("#3a3a3a");
+        
+        // Paved area (market square)
+        gc.setFill(Color.web("#9a8878", 0.6));
+        gc.fillRect(x + size * 0.2, y + size * 0.2, size * 0.6, size * 0.6);
+        
+        // Market square with accent
+        gc.setFill(accentColor.deriveColor(0, 0.5, 1.5, 0.4));
+        gc.fillRect(x + size * 0.35, y + size * 0.35, size * 0.3, size * 0.3);
+        
+        // Buildings around the square
+        double buildingW = size * 0.18;
+        double buildingH = size * 0.22;
+        
+        // Top buildings with village type roof color
+        drawBuilding(gc, x + size * 0.15, y + size * 0.10, buildingW, buildingH, BUILDING_1, roofColor);
+        drawBuilding(gc, x + size * 0.45, y + size * 0.08, buildingW * 1.3, buildingH, BUILDING_2, roofColor.darker());
+        
+        // Bottom buildings
+        drawBuilding(gc, x + size * 0.12, y + size * 0.65, buildingW * 1.2, buildingH, BUILDING_3, roofColor);
+        drawBuilding(gc, x + size * 0.55, y + size * 0.68, buildingW, buildingH * 0.9, BUILDING_1, roofColor.darker());
+        
+        // Side buildings
+        drawBuilding(gc, x + size * 0.02, y + size * 0.35, buildingW * 0.9, buildingH, BUILDING_2, roofColor);
+        drawBuilding(gc, x + size * 0.72, y + size * 0.30, buildingW, buildingH * 1.1, BUILDING_1, roofColor.darker());
+        
+        // Village type decoration in market center
+        renderVillageTypeDecoration(gc, x + size * 0.32, y + size * 0.32, size * 0.35, villageType);
     }
     
     /**

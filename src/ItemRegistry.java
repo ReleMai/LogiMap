@@ -220,6 +220,35 @@ public class ItemRegistry {
             Color.web("#f5f5dc"), Color.web("#d4c4a0"), "🧵"
         ));
         
+        // === Grain Materials ===
+        register(new Item(
+            "grain_wheat", "Wheat",
+            "Golden stalks of wheat. A staple food crop.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 99, 5,
+            Color.web("#d4a030"), Color.web("#c49020"), "🌾"
+        ));
+        
+        register(new Item(
+            "grain_oat", "Oat",
+            "Nutritious oat grain. Used for porridge and animal feed.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 99, 4,
+            Color.web("#c8b860"), Color.web("#b0a048"), "🌾"
+        ));
+        
+        register(new Item(
+            "grain_barley", "Barley",
+            "Hardy barley grain. Essential for brewing.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 99, 4,
+            Color.web("#d0b050"), Color.web("#b89838"), "🌾"
+        ));
+        
+        register(new Item(
+            "grain_rye", "Rye",
+            "Dark rye grain. Makes hearty bread.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 99, 6,
+            Color.web("#a08848"), Color.web("#887030"), "🌾"
+        ));
+        
         // === Tools ===
         register(new Item(
             "pickaxe", "Iron Pickaxe",

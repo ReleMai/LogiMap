@@ -8,6 +8,8 @@ import java.util.*;
  * - Climate-based biome distribution
  * - Intelligent structure placement based on terrain suitability
  * - Points of interest from natural landmarks
+ * - Village classification with resource assignment
+ * - Farmland nodes around agricultural villages
  */
 public class DemoWorld {
     
@@ -28,6 +30,9 @@ public class DemoWorld {
     
     // World metadata
     private List<PointOfInterest> pointsOfInterest;
+    
+    // Farmland nodes around villages
+    private List<FarmlandNode> farmlandNodes;
     
     /**
      * Default constructor using default seed.
@@ -78,11 +83,16 @@ public class DemoWorld {
         this.resourceMap = new ResourceMap(terrain.getTerrainMap(), MAP_WIDTH, MAP_HEIGHT, seed);
         this.structures = new ArrayList<>();
         this.pointsOfInterest = worldGen.getPointsOfInterest();
+        this.farmlandNodes = new ArrayList<>();
         
         // Generate structures using intelligent placement
         generateDemoStructures();
         
+        // Generate farmland nodes around agricultural villages
+        generateFarmlandNodes();
+        
         System.out.println("DemoWorld: Placed " + structures.size() + " structures");
+        System.out.println("DemoWorld: Generated " + farmlandNodes.size() + " farmland nodes");
         System.out.println("=== DemoWorld: World '" + mapName + "' ready! ===");
     }
     
@@ -113,6 +123,10 @@ public class DemoWorld {
                 terrainMap[x][y] = worldTerrain[x][y];
             }
         }
+        
+        // Copy decorations and resource nodes
+        terrain.setDecorations(worldGen.getDecorations());
+        terrain.setResourceNodes(worldGen.getResourceNodes());
     }
     
     /**
@@ -137,11 +151,15 @@ public class DemoWorld {
             placeStructure(town);
         }
         
-        // Place minor towns with terrain-appropriate names
+        // Place minor towns with terrain-appropriate names and village classification
         for (int i = 0; i < minorTownLocations.size(); i++) {
             int[] loc = minorTownLocations.get(i);
             String name = getTerrainAppropriateName(loc[0], loc[1], false);
             Town town = new Town(loc[0], loc[1], name, false);
+            
+            // Classify the village based on terrain
+            classifyVillage(town, rand);
+            
             placeStructure(town);
         }
         
@@ -455,6 +473,163 @@ public class DemoWorld {
         return new int[]{x, y};
     }
     
+    // ==================== VILLAGE CLASSIFICATION ====================
+    
+    /**
+     * Classifies a village based on surrounding terrain.
+     * Assigns a VillageType and specific resource.
+     * 
+     * NOTE: Currently forcing ALL villages to be AGRICULTURAL for testing.
+     * To enable other types, uncomment the terrain-based logic below.
+     */
+    private void classifyVillage(Town town, Random rand) {
+        int x = town.getGridX();
+        int y = town.getGridY();
+        
+        // FOR TESTING: Force all villages to be agricultural
+        VillageType villageType = VillageType.AGRICULTURAL;
+        
+        /* ORIGINAL TERRAIN-BASED LOGIC (uncomment to restore):
+        // Check terrain features around the village
+        boolean nearWater = distanceToWater(x, y) < 15;
+        boolean nearMountain = hasTerrainNearby(x, y, 20, TerrainType.MOUNTAIN, TerrainType.ROCKY_HILLS);
+        boolean nearForest = hasTerrainNearby(x, y, 15, TerrainType.FOREST, TerrainType.DENSE_FOREST);
+        
+        TerrainType centerTerrain = worldGen.getTerrain(x, y);
+        if (centerTerrain == null) centerTerrain = TerrainType.PLAINS;
+        
+        // Determine village type based on terrain
+        villageType = VillageType.determineFromTerrain(
+            centerTerrain, nearWater, nearMountain, nearForest, rand
+        );
+        */
+        
+        town.setVillageType(villageType);
+        
+        // Assign specific resource for agricultural villages
+        if (villageType == VillageType.AGRICULTURAL) {
+            GrainType grainType = GrainType.randomWeighted(rand);
+            town.setSpecificResource(grainType);
+        }
+        
+        System.out.println("  Village '" + town.getName() + "' classified as " + 
+                          villageType.getDisplayName() + 
+                          (town.getSpecificResource() != null ? " (" + town.getResourceDisplay() + ")" : ""));
+    }
+    
+    /**
+     * Checks if certain terrain types exist within a radius of a point.
+     */
+    private boolean hasTerrainNearby(int x, int y, int radius, TerrainType... types) {
+        for (int dx = -radius; dx <= radius; dx += 3) {
+            for (int dy = -radius; dy <= radius; dy += 3) {
+                int nx = x + dx;
+                int ny = y + dy;
+                if (nx >= 0 && nx < MAP_WIDTH && ny >= 0 && ny < MAP_HEIGHT) {
+                    TerrainType t = worldGen.getTerrain(nx, ny);
+                    if (t != null) {
+                        for (TerrainType check : types) {
+                            if (t == check) return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    
+    // ==================== FARMLAND GENERATION ====================
+    
+    /**
+     * Generates farmland nodes around agricultural villages.
+     */
+    private void generateFarmlandNodes() {
+        farmlandNodes.clear();
+        Random farmRand = new Random(seed + 9999);
+        
+        // Find all agricultural villages
+        for (MapStructure structure : structures) {
+            if (structure instanceof Town) {
+                Town town = (Town) structure;
+                
+                // Only agricultural villages get farmland
+                if (town.getVillageType() == VillageType.AGRICULTURAL && !town.isMajor()) {
+                    generateFarmlandAroundVillage(town, farmRand);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Generates farmland nodes in a tight ring around an agricultural village.
+     */
+    private void generateFarmlandAroundVillage(Town village, Random rand) {
+        int vx = village.getGridX();
+        int vy = village.getGridY();
+        int vSize = village.getSize();
+        
+        // Get the grain type this village produces
+        GrainType grainType = GrainType.WHEAT; // Default
+        if (village.getSpecificResource() instanceof GrainType) {
+            grainType = (GrainType) village.getSpecificResource();
+        }
+        
+        // Generate 6-10 farmland nodes in a uniform ring around the village
+        int farmCount = 6 + rand.nextInt(5);
+        
+        // Place farms uniformly around the village in cardinal directions
+        double baseDistance = vSize + 3; // Just outside village bounds
+        double maxDistance = vSize + 8;  // Close ring (3-8 tiles from village edge)
+        
+        for (int i = 0; i < farmCount; i++) {
+            // Distribute evenly around the village
+            double angle = (i * Math.PI * 2.0 / farmCount) + rand.nextDouble() * 0.3;
+            double distance = baseDistance + rand.nextDouble() * (maxDistance - baseDistance);
+            
+            int fx = (int)(vx + vSize/2 + Math.cos(angle) * distance);
+            int fy = (int)(vy + vSize/2 + Math.sin(angle) * distance);
+            
+            // Check if location is valid for farming
+            if (isValidFarmlandLocation(fx, fy)) {
+                // Check not too close to other farmlands (reduced distance)
+                boolean tooClose = false;
+                for (FarmlandNode existing : farmlandNodes) {
+                    double dx = existing.getWorldX() - fx;
+                    double dy = existing.getWorldY() - fy;
+                    if (Math.sqrt(dx*dx + dy*dy) < 6) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                
+                if (!tooClose) {
+                    FarmlandNode farmland = new FarmlandNode(fx, fy, grainType, village);
+                    farmlandNodes.add(farmland);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Checks if a location is suitable for farmland.
+     */
+    private boolean isValidFarmlandLocation(int x, int y) {
+        // Must be within bounds
+        if (x < 5 || y < 5 || x >= MAP_WIDTH - 5 || y >= MAP_HEIGHT - 5) {
+            return false;
+        }
+        
+        // Check terrain is suitable for farming
+        TerrainType t = worldGen.getTerrain(x, y);
+        if (t == null || t.isWater()) return false;
+        
+        // Good farming terrain
+        return t == TerrainType.PLAINS || 
+               t == TerrainType.MEADOW || 
+               t == TerrainType.GRASS ||
+               t == TerrainType.SAVANNA;
+    }
+    
     // ==================== PUBLIC ACCESSORS ====================
     
     public TerrainGenerator getTerrain() {
@@ -475,6 +650,13 @@ public class DemoWorld {
     
     public List<MapStructure> getStructures() {
         return structures;
+    }
+    
+    /**
+     * Gets all farmland nodes in the world.
+     */
+    public List<FarmlandNode> getFarmlandNodes() {
+        return farmlandNodes;
     }
     
     /**

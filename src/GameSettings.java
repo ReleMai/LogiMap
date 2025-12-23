@@ -80,6 +80,7 @@ public class GameSettings {
     private boolean showTutorialTips = true;
     private double scrollSpeed = 1.0;
     private double zoomSpeed = 1.0;
+    private boolean moveToInteract = true; // Right-click moves player to interactable objects
     
     // Listeners for settings changes
     private Runnable onSettingsChanged;
@@ -107,6 +108,7 @@ public class GameSettings {
     public boolean isShowTutorialTips() { return showTutorialTips; }
     public double getScrollSpeed() { return scrollSpeed; }
     public double getZoomSpeed() { return zoomSpeed; }
+    public boolean isMoveToInteract() { return moveToInteract; }
     
     // ==================== Setters ====================
     
@@ -160,6 +162,11 @@ public class GameSettings {
         notifyChanged();
     }
     
+    public void setMoveToInteract(boolean moveToInteract) {
+        this.moveToInteract = moveToInteract;
+        notifyChanged();
+    }
+    
     public void setOnSettingsChanged(Runnable callback) {
         this.onSettingsChanged = callback;
     }
@@ -185,6 +192,7 @@ public class GameSettings {
         props.setProperty("showTutorialTips", String.valueOf(showTutorialTips));
         props.setProperty("scrollSpeed", String.valueOf(scrollSpeed));
         props.setProperty("zoomSpeed", String.valueOf(zoomSpeed));
+        props.setProperty("moveToInteract", String.valueOf(moveToInteract));
         
         try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
             props.store(fos, "LogiMap Game Settings");
@@ -213,6 +221,7 @@ public class GameSettings {
             showTutorialTips = Boolean.parseBoolean(props.getProperty("showTutorialTips", "true"));
             scrollSpeed = Double.parseDouble(props.getProperty("scrollSpeed", "1.0"));
             zoomSpeed = Double.parseDouble(props.getProperty("zoomSpeed", "1.0"));
+            moveToInteract = Boolean.parseBoolean(props.getProperty("moveToInteract", "true"));
             
         } catch (IOException | NumberFormatException e) {
             System.err.println("Failed to load settings: " + e.getMessage());
@@ -233,6 +242,7 @@ public class GameSettings {
         showTutorialTips = true;
         scrollSpeed = 1.0;
         zoomSpeed = 1.0;
+        moveToInteract = true;
         notifyChanged();
     }
 }

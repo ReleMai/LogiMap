@@ -33,6 +33,7 @@ public class TownInteractionMenu extends StackPane {
     private Label townTypeLabel;
     private Label populationLabel;
     private VBox optionsContainer;
+    private Button restBtn;
     
     // Callback handlers
     private Runnable onClose;
@@ -187,8 +188,8 @@ public class TownInteractionMenu extends StackPane {
             if (onTrade != null) onTrade.run();
         });
         
-        // Rest button
-        Button restBtn = createStyledButton("🛏 Rest at Inn (10 gold)", true);
+        // Rest button (text will be updated when showing)
+        restBtn = createStyledButton("🛏 Rest", true);
         restBtn.setOnAction(e -> {
             if (onRest != null) onRest.run();
         });
@@ -258,6 +259,15 @@ public class TownInteractionMenu extends StackPane {
         townNameLabel.setText(town.getName());
         townTypeLabel.setText(town.isMajor() ? "⭐ Major Town" : "Minor Settlement");
         populationLabel.setText("👥 Population: " + formatNumber((int)town.getPopulation()));
+        
+        // Update rest button text based on town type
+        PlayerEnergy.RestLocation restLocation = town.getRestLocation();
+        int cost = restLocation.getCost();
+        if (cost > 0) {
+            restBtn.setText("🛏 " + restLocation.getDisplayName() + " (" + cost + " gold)");
+        } else {
+            restBtn.setText("🛏 Rest at " + restLocation.getDisplayName() + " (Free)");
+        }
         
         // Show with animation
         this.setVisible(true);

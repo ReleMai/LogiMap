@@ -8,6 +8,7 @@ import javafx.scene.input.ScrollEvent;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
@@ -51,6 +52,12 @@ public class MapCanvas {
     private MovementFlag movementFlag;
     private Consumer<Town> onTownInteraction;  // Callback when player arrives at a town
     private Town pendingTownInteraction = null;  // Town to interact with when player arrives
+    private FarmlandNode pendingFarmlandInteraction = null;  // Farmland to interact with when player arrives
+    
+    // Game systems
+    private GameTime gameTime;
+    private PlayerEnergy playerEnergy;
+    private FarmlandInteraction farmlandInteraction;
     
     // Tooltip state
     private boolean ctrlHeld = false;
@@ -101,6 +108,27 @@ public class MapCanvas {
         // Initialize movement flag
         this.movementFlag = new MovementFlag();
         
+        // Initialize game systems
+        this.gameTime = new GameTime();
+        this.playerEnergy = new PlayerEnergy();
+        this.farmlandInteraction = new FarmlandInteraction(gameTime, playerEnergy);
+        
+        // Set up farmland harvest callback
+        this.farmlandInteraction.setHarvestCallback((farmland, yield, grainType) -> {
+            System.out.println("Harvested " + yield + " " + grainType.getDisplayName() + "!");
+            // Add grain to player inventory
+            if (player != null) {
+                String itemId = "grain_" + grainType.name().toLowerCase();
+                ItemStack stack = ItemRegistry.createStack(itemId, yield);
+                if (stack != null) {
+                    ItemStack remaining = player.getInventory().addItem(stack);
+                    if (remaining != null && !remaining.isEmpty()) {
+                        System.out.println("Inventory full! " + remaining.getQuantity() + " " + grainType.getDisplayName() + " dropped.");
+                    }
+                }
+            }
+        });
+        
         setupEventHandlers();
         setupResizeListeners();
         render();
@@ -150,6 +178,19 @@ public class MapCanvas {
                     }
                 }
             }
+            
+            // Check if player just stopped moving and has a pending farmland interaction
+            if (wasMoving && !player.isMoving() && pendingFarmlandInteraction != null) {
+                // Check if player is near the farmland
+                if (isPlayerNearFarmland(pendingFarmlandInteraction)) {
+                    FarmlandNode farmland = pendingFarmlandInteraction;
+                    pendingFarmlandInteraction = null;
+                    
+                    // Show the farmland interaction menu
+                    double[] screen = gridToScreen((int) farmland.getWorldX(), (int) farmland.getWorldY());
+                    farmlandInteraction.show(farmland, screen[0], screen[1]);
+                }
+            }
         }
         if (movementFlag != null) {
             movementFlag.update(deltaTime);
@@ -171,6 +212,25 @@ public class MapCanvas {
         // Check if player is within or adjacent to town bounds
         return playerX >= townX - 1 && playerX <= townX + townSize &&
                playerY >= townY - 1 && playerY <= townY + townSize;
+    }
+    
+    /**
+     * Checks if the player is near a farmland node.
+     */
+    private boolean isPlayerNearFarmland(FarmlandNode farmland) {
+        if (player == null || farmland == null) return false;
+        
+        double playerX = player.getGridX();
+        double playerY = player.getGridY();
+        double farmX = farmland.getWorldX();
+        double farmY = farmland.getWorldY();
+        
+        // Check if player is within interaction range (3 tiles - close proximity required)
+        double dx = playerX - farmX;
+        double dy = playerY - farmY;
+        double distance = Math.sqrt(dx * dx + dy * dy);
+        
+        return distance <= 3;
     }
     
     // ==================== Event Handling ====================
@@ -223,6 +283,14 @@ public class MapCanvas {
         isDragging = false;
         
         if (wasClick) {
+            // Check if farmland interaction menu should handle the click
+            if (farmlandInteraction != null && farmlandInteraction.isVisible()) {
+                if (farmlandInteraction.onClick(e.getX(), e.getY())) {
+                    render();
+                    return;
+                }
+            }
+            
             int[] gridPos = screenToGrid(e.getX(), e.getY());
             
             if (e.getButton() == MouseButton.PRIMARY) {
@@ -264,9 +332,10 @@ public class MapCanvas {
     }
     
     /**
-     * Handles right-click: Interact with structures (especially towns).
+     * Handles right-click: Interact with structures or farmland.
      */
     private void handleRightClick(int gridX, int gridY) {
+        // Check for town/structure FIRST (higher priority than farmland)
         MapStructure structure = world.getStructureAt(gridX, gridY);
         
         if (structure instanceof Town) {
@@ -288,9 +357,54 @@ public class MapCanvas {
                 movementFlag.setPosition(structure.getGridX() + structure.getSize() / 2, 
                                         structure.getGridY() + structure.getSize() / 2);
             }
+            
+            selectedStructure = structure;
+            return;
+        }
+        
+        // Then check for farmland at this location
+        FarmlandNode farmland = getFarmlandAt(gridX, gridY);
+        if (farmland != null) {
+            // Check if player is near the farmland before allowing interaction
+            if (isPlayerNearFarmland(farmland)) {
+                double[] screen = gridToScreen(gridX, gridY);
+                farmlandInteraction.show(farmland, screen[0], screen[1]);
+            } else if (GameSettings.getInstance().isMoveToInteract() && player != null) {
+                // Move player towards farmland if setting is enabled
+                int targetX = (int) farmland.getWorldX();
+                int targetY = (int) farmland.getWorldY();
+                player.moveTo(targetX, targetY);
+                
+                // Set flag at farmland location
+                if (movementFlag != null) {
+                    movementFlag.setPosition(targetX, targetY);
+                }
+                
+                // Set pending farmland interaction
+                pendingFarmlandInteraction = farmland;
+            }
+            return;
         }
         
         selectedStructure = structure;
+    }
+    
+    /**
+     * Gets farmland at a grid position.
+     */
+    private FarmlandNode getFarmlandAt(int gridX, int gridY) {
+        List<FarmlandNode> farmlands = world.getFarmlandNodes();
+        if (farmlands == null) return null;
+        
+        for (FarmlandNode farmland : farmlands) {
+            // Check if the click is within the farmland bounds
+            double dx = Math.abs(farmland.getWorldX() - gridX);
+            double dy = Math.abs(farmland.getWorldY() - gridY);
+            if (dx < 8 && dy < 6) { // Approximate farmland size
+                return farmland;
+            }
+        }
+        return null;
     }
     
     private void handleMouseDrag(MouseEvent e) {
@@ -316,6 +430,11 @@ public class MapCanvas {
     }
     
     private void handleMouseMove(MouseEvent e) {
+        // Update farmland interaction menu hover state
+        if (farmlandInteraction != null && farmlandInteraction.isVisible()) {
+            farmlandInteraction.onMouseMove(e.getX(), e.getY());
+        }
+        
         int[] gridPos = screenToGrid(e.getX(), e.getY());
         hoveredStructure = world.getStructureAt(gridPos[0], gridPos[1]);
         
@@ -358,6 +477,9 @@ public class MapCanvas {
         
         // Render layers
         renderTerrain(width, height);
+        renderDecorations(width, height);
+        renderResourceNodes(width, height);
+        renderFarmlandNodes(width, height);
         renderRoads(width, height);
         renderStructures(width, height);
         
@@ -379,7 +501,14 @@ public class MapCanvas {
         }
         
         // Render UI
+        renderDayNightOverlay(width, height);
+        renderTimeDisplay(width);
         renderMapInfo(width);
+        
+        // Render interaction menus (on top of everything)
+        if (farmlandInteraction != null && farmlandInteraction.isVisible()) {
+            farmlandInteraction.render(gc);
+        }
     }
     
     /**
@@ -570,6 +699,65 @@ public class MapCanvas {
         
         // Darken based on depth
         return baseColor.interpolate(Color.BLACK, clamp(depth * 0.6, 0, 0.6));
+    }
+    
+    /**
+     * Renders terrain decorations (grass, rocks, trees).
+     */
+    private void renderDecorations(double width, double height) {
+        // Only render decorations at reasonable zoom levels
+        if (zoom < 0.3) return;
+        
+        List<TerrainDecoration> decorations = world.getTerrain().getDecorations();
+        if (decorations == null || decorations.isEmpty()) return;
+        
+        double viewX = -offsetX / (GRID_SIZE * zoom);
+        double viewY = -offsetY / (GRID_SIZE * zoom);
+        
+        for (TerrainDecoration dec : decorations) {
+            dec.render(gc, viewX, viewY, zoom, GRID_SIZE);
+        }
+    }
+    
+    /**
+     * Renders resource nodes (grain fields, etc.).
+     */
+    private void renderResourceNodes(double width, double height) {
+        // Only render at reasonable zoom levels
+        if (zoom < 0.2) return;
+        
+        List<ResourceNode> nodes = world.getTerrain().getResourceNodes();
+        if (nodes == null || nodes.isEmpty()) return;
+        
+        double viewX = -offsetX / (GRID_SIZE * zoom);
+        double viewY = -offsetY / (GRID_SIZE * zoom);
+        
+        for (ResourceNode node : nodes) {
+            node.render(gc, viewX, viewY, zoom, GRID_SIZE);
+        }
+    }
+    
+    /**
+     * Renders farmland nodes around villages.
+     */
+    private void renderFarmlandNodes(double width, double height) {
+        // Only render at reasonable zoom levels
+        if (zoom < 0.4) return;
+        
+        List<FarmlandNode> farmlands = world.getFarmlandNodes();
+        if (farmlands == null || farmlands.isEmpty()) return;
+        
+        for (FarmlandNode farmland : farmlands) {
+            double[] screen = gridToScreen((int)farmland.getWorldX(), (int)farmland.getWorldY());
+            
+            // Check if on screen (with buffer)
+            if (screen[0] > -100 && screen[0] < width + 100 &&
+                screen[1] > -100 && screen[1] < height + 100) {
+                
+                double scale = zoom * GRID_SIZE / 10.0;
+                farmland.render(gc, screen[0], screen[1], scale);
+            }
+        }
     }
     
     private void renderRoads(double width, double height) {
@@ -897,6 +1085,160 @@ public class MapCanvas {
         return "Scorching";
     }
     
+    /**
+     * Renders a tinted overlay based on time of day.
+     */
+    private void renderDayNightOverlay(double width, double height) {
+        if (gameTime == null) return;
+        
+        Color skyTint = gameTime.getSkyTint();
+        
+        // Apply subtle tint over the entire map
+        // The tint is semi-transparent to maintain visibility
+        double opacity = 0.15; // Subtle effect
+        
+        // Night is darker
+        if (gameTime.getTimeOfDay() == GameTime.TimeOfDay.NIGHT) {
+            opacity = 0.35;
+        } else if (gameTime.getTimeOfDay() == GameTime.TimeOfDay.DUSK ||
+                   gameTime.getTimeOfDay() == GameTime.TimeOfDay.DAWN) {
+            opacity = 0.2;
+        }
+        
+        gc.setFill(skyTint.deriveColor(0, 1, 1, opacity));
+        gc.fillRect(0, 0, width, height);
+    }
+    
+    /**
+     * Renders the time display with sun position indicator.
+     */
+    private void renderTimeDisplay(double width) {
+        if (gameTime == null) return;
+        
+        // Position in top-right corner
+        double displayX = width - 180;
+        double displayY = 10;
+        double displayWidth = 170;
+        double displayHeight = 50;
+        
+        // Background
+        gc.setFill(Color.web("#1a1208").deriveColor(0, 1, 1, 0.85));
+        gc.fillRoundRect(displayX, displayY, displayWidth, displayHeight, 8, 8);
+        
+        // Border
+        gc.setStroke(Color.web("#c4a574"));
+        gc.setLineWidth(1);
+        gc.strokeRoundRect(displayX, displayY, displayWidth, displayHeight, 8, 8);
+        
+        // Time text
+        gc.setFill(Color.web("#e8e0d0"));
+        gc.setFont(Font.font("Georgia", javafx.scene.text.FontWeight.BOLD, 14));
+        gc.fillText(gameTime.getFormattedTime(), displayX + 10, displayY + 20);
+        
+        // Time of day
+        gc.setFont(Font.font("Georgia", 11));
+        gc.setFill(gameTime.getSkyTint());
+        gc.fillText(gameTime.getTimeOfDay().getDisplayName(), displayX + 85, displayY + 20);
+        
+        // Sun position indicator (horizontal bar)
+        double barX = displayX + 10;
+        double barY = displayY + 30;
+        double barWidth = displayWidth - 20;
+        double barHeight = 12;
+        
+        // Bar background (sky gradient)
+        gc.setFill(Color.web("#0a1535")); // Night sky
+        gc.fillRect(barX, barY, barWidth, barHeight);
+        
+        // Daytime section (lighter)
+        double dayStart = barWidth * 0.25; // 6:00 = 25% of day
+        double dayEnd = barWidth * 0.833;   // 20:00 = 83% of day
+        gc.setFill(Color.web("#4a90d0").deriveColor(0, 1, 1, 0.5));
+        gc.fillRect(barX + dayStart, barY, dayEnd - dayStart, barHeight);
+        
+        // Sun indicator
+        double sunX = barX + gameTime.getSunPosition() * barWidth;
+        Color sunColor = gameTime.getTimeOfDay() == GameTime.TimeOfDay.NIGHT 
+            ? Color.web("#aaaaaa") // Moon color
+            : Color.web("#ffdd00"); // Sun color
+        
+        gc.setFill(sunColor);
+        gc.fillOval(sunX - 5, barY + barHeight/2 - 5, 10, 10);
+        
+        // Border for bar
+        gc.setStroke(Color.web("#c4a574").darker());
+        gc.setLineWidth(1);
+        gc.strokeRect(barX, barY, barWidth, barHeight);
+        
+        // Render energy meter right below
+        renderEnergyMeter(displayX, displayY + displayHeight + 5, displayWidth);
+    }
+    
+    /**
+     * Renders the energy meter display beneath the time meter.
+     */
+    private void renderEnergyMeter(double displayX, double displayY, double displayWidth) {
+        if (playerEnergy == null) return;
+        
+        double displayHeight = 35;
+        
+        // Background
+        gc.setFill(Color.web("#1a1208").deriveColor(0, 1, 1, 0.85));
+        gc.fillRoundRect(displayX, displayY, displayWidth, displayHeight, 8, 8);
+        
+        // Border
+        gc.setStroke(Color.web("#c4a574"));
+        gc.setLineWidth(1);
+        gc.strokeRoundRect(displayX, displayY, displayWidth, displayHeight, 8, 8);
+        
+        // Energy label and value
+        gc.setFill(Color.web("#e8e0d0"));
+        gc.setFont(Font.font("Georgia", javafx.scene.text.FontWeight.BOLD, 11));
+        gc.fillText("Energy", displayX + 10, displayY + 15);
+        
+        // Percentage text
+        int percent = (int)(playerEnergy.getEnergyPercent() * 100);
+        String energyText = (int)playerEnergy.getCurrentEnergy() + "/" + (int)playerEnergy.getMaxEnergy();
+        gc.setFill(getEnergyColor());
+        gc.fillText(energyText, displayX + 70, displayY + 15);
+        
+        // Energy bar
+        double barX = displayX + 10;
+        double barY = displayY + 20;
+        double barWidth = displayWidth - 20;
+        double barHeight = 10;
+        
+        // Bar background
+        gc.setFill(Color.web("#101010"));
+        gc.fillRect(barX, barY, barWidth, barHeight);
+        
+        // Filled portion
+        double fillWidth = barWidth * playerEnergy.getEnergyPercent();
+        gc.setFill(getEnergyColor());
+        gc.fillRect(barX, barY, fillWidth, barHeight);
+        
+        // Border for bar
+        gc.setStroke(Color.web("#5a4a30"));
+        gc.setLineWidth(1);
+        gc.strokeRect(barX, barY, barWidth, barHeight);
+    }
+    
+    /**
+     * Gets the color for the energy bar based on current energy level.
+     */
+    private Color getEnergyColor() {
+        if (playerEnergy == null) return Color.web("#40a040");
+        
+        double percent = playerEnergy.getEnergyPercent();
+        if (percent > 0.6) {
+            return Color.web("#40a040"); // Green - good
+        } else if (percent > 0.3) {
+            return Color.web("#c0a040"); // Yellow - medium
+        } else {
+            return Color.web("#c04040"); // Red - low
+        }
+    }
+    
     private void renderMapInfo(double width) {
         String info = String.format("Mode: %s | Zoom: %.0f%% | Structures: %d",
             mapMode, zoom * 100, world.getStructures().size());
@@ -989,6 +1331,14 @@ public class MapCanvas {
     
     public DemoWorld getWorld() {
         return world;
+    }
+    
+    public GameTime getGameTime() {
+        return gameTime;
+    }
+    
+    public PlayerEnergy getPlayerEnergy() {
+        return playerEnergy;
     }
     
     // View state getters for save/load
