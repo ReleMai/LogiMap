@@ -27,11 +27,13 @@ public class PlayerEnergy {
     public static final int FISHING_COST = 8;
     public static final double WALKING_COST_PER_TILE = 0.05;
     public static final double RUNNING_COST_PER_TILE = 0.15;
+    public static final double SWIMMING_COST_PER_TILE = 3.0;  // Deep water swimming cost
+    public static final double WADING_COST_PER_TILE = 0.0;    // Shallow water (wading) is free
     
     // Recovery rates
     public static final double VILLAGE_REST_PER_MINUTE = 1.0;  // 1 energy per game minute
     public static final double PASSIVE_RECOVERY_PER_MINUTE = 0.1; // Slow passive regen
-    public static final int INN_REST_COST_GOLD = 5; // Cost to rest at city inn
+    public static final int INN_REST_COST_GOLD = 2; // Cost to rest at city inn (reduced from 5)
     
     // Current state
     private double currentEnergy;
@@ -49,7 +51,7 @@ public class PlayerEnergy {
     public enum RestLocation {
         NONE("None", 0, 0, false),
         VILLAGE_OUTDOORS("Village Square", VILLAGE_REST_PER_MINUTE * 0.5, 0, true),
-        VILLAGE_INN("Village Inn", VILLAGE_REST_PER_MINUTE, 2, true),
+        VILLAGE_INN("Village Inn", VILLAGE_REST_PER_MINUTE, 1, true), // Reduced from 2
         CITY_INN("City Inn", MAX_ENERGY, INN_REST_COST_GOLD, false), // Instant restore
         CAMPFIRE("Campfire", VILLAGE_REST_PER_MINUTE * 0.3, 0, true),
         HOME("Home", VILLAGE_REST_PER_MINUTE * 1.5, 0, true);
@@ -167,6 +169,22 @@ public class PlayerEnergy {
      */
     public void consumeRunningEnergy(double tiles) {
         consumeEnergy(tiles * RUNNING_COST_PER_TILE);
+    }
+    
+    /**
+     * Consumes energy for swimming in deep water.
+     * Swimming costs 3 energy per tile - very tiring!
+     */
+    public void consumeSwimmingEnergy(double tiles) {
+        consumeEnergy(tiles * SWIMMING_COST_PER_TILE);
+    }
+    
+    /**
+     * Consumes energy for wading in shallow water.
+     * Wading is free - no energy cost.
+     */
+    public void consumeWadingEnergy(double tiles) {
+        consumeEnergy(tiles * WADING_COST_PER_TILE);
     }
     
     // ==================== ENERGY RECOVERY ====================

@@ -202,12 +202,7 @@ public class Item {
                 break;
         }
         
-        // Add icon symbol if present
-        if (iconSymbol != null && !iconSymbol.isEmpty()) {
-            gc.setFill(Color.WHITE);
-            gc.setFont(javafx.scene.text.Font.font("System", size * 0.5));
-            gc.fillText(iconSymbol, x + size * 0.25, y + size * 0.65);
-        }
+        // Note: iconSymbol text overlay removed since we now use proper graphical sprites via ItemRenderer
     }
     
     private void renderEquipmentShape(GraphicsContext gc, double x, double y, double size) {

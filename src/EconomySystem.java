@@ -5,31 +5,62 @@ import java.util.*;
  * 
  * Features:
  * - Base prices for all items
- * - Scarcity multipliers based on local supply/demand
+ * - Dynamic supply based on village type (villages sell what they produce)
+ * - Dynamic demand based on village type (villages need what they don't produce)
  * - Different prices at villages vs cities
  * - Price memory (tracks recent trades)
  */
 public class EconomySystem {
     
-    // Base prices for different resource types (in gold)
+    // Base prices for different resource types (in copper)
     private static final Map<String, Integer> BASE_PRICES = new HashMap<>();
     
     static {
-        // Grain prices
+        // === Grain (from Agricultural villages) ===
         BASE_PRICES.put("grain_wheat", 2);
         BASE_PRICES.put("grain_oat", 3);
         BASE_PRICES.put("grain_barley", 3);
         BASE_PRICES.put("grain_rye", 4);
         
-        // Other resources (future)
-        BASE_PRICES.put("wood_oak", 5);
-        BASE_PRICES.put("wood_pine", 3);
-        BASE_PRICES.put("ore_iron", 8);
-        BASE_PRICES.put("ore_copper", 6);
-        BASE_PRICES.put("fish_common", 4);
-        BASE_PRICES.put("fish_rare", 12);
-        BASE_PRICES.put("stone_common", 2);
-        BASE_PRICES.put("stone_marble", 10);
+        // === Timber (from Lumber villages) ===
+        BASE_PRICES.put("timber_oak", 8);
+        BASE_PRICES.put("timber_birch", 6);
+        BASE_PRICES.put("timber_pine", 5);
+        BASE_PRICES.put("timber_cedar", 10);
+        
+        // === Stone (from Mining villages without mountains) ===
+        BASE_PRICES.put("stone_granite", 5);
+        BASE_PRICES.put("stone_limestone", 4);
+        BASE_PRICES.put("stone_sandstone", 3);
+        BASE_PRICES.put("stone_marble", 12);
+        
+        // === Fish (from Fishing villages) ===
+        BASE_PRICES.put("fish_trout", 6);
+        BASE_PRICES.put("fish_salmon", 8);
+        BASE_PRICES.put("fish_pike", 7);
+        BASE_PRICES.put("fish_carp", 4);
+        
+        // === Ore (from Mining villages near mountains) ===
+        BASE_PRICES.put("ore_copper", 15);
+        BASE_PRICES.put("ore_tin", 12);
+        BASE_PRICES.put("ore_iron", 25);
+        BASE_PRICES.put("ore_zinc", 18);
+        
+        // === Meat (from Pastoral villages) ===
+        BASE_PRICES.put("meat_mutton", 12);
+        BASE_PRICES.put("meat_beef", 18);
+        BASE_PRICES.put("meat_pork", 15);
+        BASE_PRICES.put("meat_chicken", 10);
+        
+        // Legacy mappings for compatibility
+        BASE_PRICES.put("wood_oak", 8);
+        BASE_PRICES.put("wood_pine", 5);
+        BASE_PRICES.put("ore_iron", 25);
+        BASE_PRICES.put("ore_copper", 15);
+        BASE_PRICES.put("fish_common", 5);
+        BASE_PRICES.put("fish_rare", 15);
+        BASE_PRICES.put("stone_common", 4);
+        BASE_PRICES.put("stone_marble", 12);
     }
     
     // Track supply at each town (resource ID -> quantity available)
@@ -66,51 +97,100 @@ public class EconomySystem {
     
     /**
      * Registers a town in the economy.
+     * Supply/demand is dynamically set based on village type:
+     * - Villages produce their specialty (high supply, low demand)
+     * - Villages need other goods (low supply, high demand)
      */
     public void registerTown(Town town) {
         Map<String, Integer> supply = new HashMap<>();
         Map<String, Double> demand = new HashMap<>();
         
-        // Initialize based on village type
         VillageType type = town.getVillageType();
         
         for (String resourceId : BASE_PRICES.keySet()) {
             // Default supply and demand
-            int baseSupply = 50 + random.nextInt(50);
+            int baseSupply = 30 + random.nextInt(30);
             double baseDemand = 1.0;
             
-            // Adjust based on village specialty
+            // Determine resource category
+            boolean isGrain = resourceId.startsWith("grain_");
+            boolean isTimber = resourceId.startsWith("timber_") || resourceId.startsWith("wood_");
+            boolean isStone = resourceId.startsWith("stone_");
+            boolean isFish = resourceId.startsWith("fish_");
+            boolean isOre = resourceId.startsWith("ore_");
+            boolean isMeat = resourceId.startsWith("meat_");
+            
             if (type != null) {
-                if (resourceId.startsWith("grain_") && type == VillageType.AGRICULTURAL) {
-                    // Agricultural villages produce grain - high supply
-                    baseSupply *= 2;
-                    baseDemand = 0.5; // Low demand (they have plenty)
-                    
-                    // Even higher for their specific grain type
+                // === PRODUCERS: High supply, low demand for their goods ===
+                boolean isProducer = false;
+                
+                if (isGrain && type == VillageType.AGRICULTURAL) {
+                    baseSupply = 150 + random.nextInt(100);
+                    baseDemand = 0.3;
+                    isProducer = true;
+                } else if (isTimber && type == VillageType.LUMBER) {
+                    baseSupply = 120 + random.nextInt(80);
+                    baseDemand = 0.3;
+                    isProducer = true;
+                } else if (isStone && type == VillageType.MINING) {
+                    baseSupply = 100 + random.nextInt(80);
+                    baseDemand = 0.4;
+                    isProducer = true;
+                } else if (isOre && type == VillageType.MINING) {
+                    baseSupply = 80 + random.nextInt(60);
+                    baseDemand = 0.4;
+                    isProducer = true;
+                } else if (isFish && type == VillageType.FISHING) {
+                    baseSupply = 100 + random.nextInt(80);
+                    baseDemand = 0.3;
+                    isProducer = true;
+                } else if (isMeat && type == VillageType.PASTORAL) {
+                    baseSupply = 100 + random.nextInt(80);
+                    baseDemand = 0.3;
+                    isProducer = true;
+                }
+                
+                // Even higher for their specific resource type
+                if (isProducer) {
                     Object specific = town.getSpecificResource();
-                    if (specific instanceof GrainType) {
-                        String specificId = "grain_" + ((GrainType) specific).name().toLowerCase();
-                        if (resourceId.equals(specificId)) {
-                            baseSupply *= 2;
-                            baseDemand = 0.3;
-                        }
+                    String specificId = getSpecificResourceId(specific);
+                    if (specificId != null && resourceId.equals(specificId)) {
+                        baseSupply = (int)(baseSupply * 1.5);
+                        baseDemand = 0.2;
                     }
-                } else if (resourceId.startsWith("wood_") && type == VillageType.LUMBER) {
-                    baseSupply *= 2;
-                    baseDemand = 0.5;
-                } else if (resourceId.startsWith("ore_") && type == VillageType.MINING) {
-                    baseSupply *= 2;
-                    baseDemand = 0.5;
-                } else if (resourceId.startsWith("fish_") && type == VillageType.FISHING) {
-                    baseSupply *= 2;
-                    baseDemand = 0.5;
+                }
+                
+                // === CONSUMERS: Villages need what they don't produce ===
+                if (!isProducer) {
+                    // Food is always in demand
+                    if ((isGrain || isFish || isMeat) && type != VillageType.AGRICULTURAL && 
+                        type != VillageType.FISHING && type != VillageType.PASTORAL) {
+                        baseSupply = 10 + random.nextInt(20);
+                        baseDemand = 1.5 + random.nextDouble() * 0.5;
+                    }
+                    // Materials are needed for construction
+                    if ((isTimber || isStone) && type != VillageType.LUMBER && type != VillageType.MINING) {
+                        baseSupply = 15 + random.nextInt(25);
+                        baseDemand = 1.3 + random.nextDouble() * 0.4;
+                    }
+                    // Ore for tools/weapons
+                    if (isOre && type != VillageType.MINING) {
+                        baseSupply = 5 + random.nextInt(15);
+                        baseDemand = 1.4 + random.nextDouble() * 0.4;
+                    }
                 }
             }
             
-            // Cities have more demand and higher base supply
+            // Cities have more of everything and higher demand
             if (town.isMajor()) {
-                baseSupply *= 1.5;
-                baseDemand *= 1.5;
+                baseSupply = (int)(baseSupply * 1.5);
+                baseDemand *= 1.3;
+            }
+            
+            // Trading villages have balanced moderate supply
+            if (type == VillageType.TRADING) {
+                baseSupply = 60 + random.nextInt(40);
+                baseDemand = 1.0;
             }
             
             supply.put(resourceId, baseSupply);
@@ -122,38 +202,67 @@ public class EconomySystem {
     }
     
     /**
+     * Gets the item ID for a specific resource type.
+     */
+    private String getSpecificResourceId(Object specific) {
+        if (specific instanceof GrainType) {
+            return "grain_" + ((GrainType) specific).name().toLowerCase();
+        } else if (specific instanceof WoodType) {
+            return "timber_" + ((WoodType) specific).name().toLowerCase();
+        } else if (specific instanceof StoneType) {
+            return "stone_" + ((StoneType) specific).name().toLowerCase();
+        } else if (specific instanceof FishType) {
+            return "fish_" + ((FishType) specific).name().toLowerCase();
+        } else if (specific instanceof OreType) {
+            return "ore_" + ((OreType) specific).name().toLowerCase();
+        } else if (specific instanceof LivestockType) {
+            return ((LivestockType) specific).getItemId();
+        }
+        return null;
+    }
+    
+    /**
      * Updates the economy simulation.
+     * Production villages regenerate their specialty faster.
      */
     public void update() {
         long now = System.currentTimeMillis();
         if (now - lastUpdateTime < UPDATE_INTERVAL_MS) return;
         lastUpdateTime = now;
         
-        // Fluctuate supply and demand slightly
         for (Town town : townSupply.keySet()) {
             Map<String, Integer> supply = townSupply.get(town);
             Map<String, Double> demand = townDemand.get(town);
+            VillageType type = town.getVillageType();
             
             for (String resourceId : supply.keySet()) {
-                // Natural production/consumption
                 int currentSupply = supply.get(resourceId);
                 double currentDemand = demand.get(resourceId);
                 
-                // Supply slowly regenerates
+                // Base regeneration
                 int regen = 1 + random.nextInt(3);
                 
-                // Adjust regen based on village type
-                VillageType type = town.getVillageType();
+                // Producers regenerate their goods faster
                 if (type != null) {
-                    if ((resourceId.startsWith("grain_") && type == VillageType.AGRICULTURAL) ||
-                        (resourceId.startsWith("wood_") && type == VillageType.LUMBER) ||
-                        (resourceId.startsWith("ore_") && type == VillageType.MINING) ||
-                        (resourceId.startsWith("fish_") && type == VillageType.FISHING)) {
-                        regen *= 3;
+                    boolean isGrain = resourceId.startsWith("grain_");
+                    boolean isTimber = resourceId.startsWith("timber_") || resourceId.startsWith("wood_");
+                    boolean isStone = resourceId.startsWith("stone_");
+                    boolean isFish = resourceId.startsWith("fish_");
+                    boolean isOre = resourceId.startsWith("ore_");
+                    boolean isMeat = resourceId.startsWith("meat_");
+                    
+                    if ((isGrain && type == VillageType.AGRICULTURAL) ||
+                        (isTimber && type == VillageType.LUMBER) ||
+                        ((isStone || isOre) && type == VillageType.MINING) ||
+                        (isFish && type == VillageType.FISHING) ||
+                        (isMeat && type == VillageType.PASTORAL)) {
+                        regen *= 4;  // Producers restock 4x faster
                     }
                 }
                 
-                supply.put(resourceId, Math.min(200, currentSupply + regen));
+                // Cap supply at reasonable levels
+                int maxSupply = 200;
+                supply.put(resourceId, Math.min(maxSupply, currentSupply + regen));
                 
                 // Demand fluctuates randomly
                 double demandChange = (random.nextDouble() - 0.5) * 0.1;

@@ -327,6 +327,30 @@ public class FarmlandNode {
     }
     
     /**
+     * Directly harvests without checking energy/time (for timed actions).
+     * Call only after validation is already done by the interaction system.
+     */
+    public int harvestDirect() {
+        if (!isHarvestable || !growthStage.canHarvest()) {
+            return 0;
+        }
+        
+        int yield = calculateYield();
+        harvestsRemaining--;
+        lastHarvestTime = System.currentTimeMillis();
+        
+        if (harvestsRemaining <= 0) {
+            growthStage = GrowthStage.HARVESTED;
+            isHarvestable = false;
+        } else {
+            growthStage = GrowthStage.GROWING;
+            isHarvestable = false;
+        }
+        
+        return yield;
+    }
+    
+    /**
      * Calculates harvest yield based on growth stage and plot size.
      */
     private int calculateYield() {
@@ -395,6 +419,8 @@ public class FarmlandNode {
     
     public double getWorldX() { return worldX; }
     public double getWorldY() { return worldY; }
+    public int getWidth() { return plotWidth; }
+    public int getHeight() { return plotHeight; }
     public GrainType getGrainType() { return grainType; }
     public GrowthStage getGrowthStage() { return growthStage; }
     public boolean isHarvestable() { return isHarvestable && growthStage.canHarvest(); }

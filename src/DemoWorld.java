@@ -9,7 +9,7 @@ import java.util.*;
  * - Intelligent structure placement based on terrain suitability
  * - Points of interest from natural landmarks
  * - Village classification with resource assignment
- * - Farmland nodes around agricultural villages
+ * - Resource nodes around specialized villages (farmland, lumber, quarry, fishery, ore)
  */
 public class DemoWorld {
     
@@ -31,8 +31,13 @@ public class DemoWorld {
     // World metadata
     private List<PointOfInterest> pointsOfInterest;
     
-    // Farmland nodes around villages
+    // Resource nodes around villages
     private List<FarmlandNode> farmlandNodes;
+    private List<LumberNode> lumberNodes;
+    private List<QuarryNode> quarryNodes;
+    private List<FisheryNode> fisheryNodes;
+    private List<OreNode> oreNodes;
+    private List<PastoralNode> pastoralNodes;
     
     /**
      * Default constructor using default seed.
@@ -83,16 +88,28 @@ public class DemoWorld {
         this.resourceMap = new ResourceMap(terrain.getTerrainMap(), MAP_WIDTH, MAP_HEIGHT, seed);
         this.structures = new ArrayList<>();
         this.pointsOfInterest = worldGen.getPointsOfInterest();
+        
+        // Initialize all resource node lists
         this.farmlandNodes = new ArrayList<>();
+        this.lumberNodes = new ArrayList<>();
+        this.quarryNodes = new ArrayList<>();
+        this.fisheryNodes = new ArrayList<>();
+        this.oreNodes = new ArrayList<>();
+        this.pastoralNodes = new ArrayList<>();
         
         // Generate structures using intelligent placement
         generateDemoStructures();
         
-        // Generate farmland nodes around agricultural villages
-        generateFarmlandNodes();
+        // Generate resource nodes around specialized villages
+        generateAllResourceNodes();
         
         System.out.println("DemoWorld: Placed " + structures.size() + " structures");
         System.out.println("DemoWorld: Generated " + farmlandNodes.size() + " farmland nodes");
+        System.out.println("DemoWorld: Generated " + lumberNodes.size() + " lumber nodes");
+        System.out.println("DemoWorld: Generated " + quarryNodes.size() + " quarry nodes");
+        System.out.println("DemoWorld: Generated " + fisheryNodes.size() + " fishery nodes");
+        System.out.println("DemoWorld: Generated " + oreNodes.size() + " ore nodes");
+        System.out.println("DemoWorld: Generated " + pastoralNodes.size() + " pastoral nodes");
         System.out.println("=== DemoWorld: World '" + mapName + "' ready! ===");
     }
     
@@ -152,9 +169,10 @@ public class DemoWorld {
         }
         
         // Place minor towns with terrain-appropriate names and village classification
+        // Villages near major towns may incorporate the town name
         for (int i = 0; i < minorTownLocations.size(); i++) {
             int[] loc = minorTownLocations.get(i);
-            String name = getTerrainAppropriateName(loc[0], loc[1], false);
+            String name = getVillageNameNearTown(loc[0], loc[1], rand);
             Town town = new Town(loc[0], loc[1], name, false);
             
             // Classify the village based on terrain
@@ -202,6 +220,80 @@ public class DemoWorld {
         boolean isForest = t == TerrainType.FOREST || t == TerrainType.DENSE_FOREST;
         
         return NameGenerator.getTerrainAppropriateLocationName(nearWater, isMountain, isForest, x, y, seed);
+    }
+    
+    /**
+     * Gets a name for a village that may incorporate a nearby major town's name.
+     * Villages within a certain distance of a major town use town-derivative names.
+     */
+    private String getVillageNameNearTown(int x, int y, Random rand) {
+        // Look for nearby major towns
+        Town nearestMajorTown = null;
+        double nearestDist = Double.MAX_VALUE;
+        double influenceRadius = MAP_WIDTH / 6.0;  // Villages within this range use town names
+        
+        for (MapStructure structure : structures) {
+            if (structure instanceof Town town && town.isMajor()) {
+                double dist = Math.sqrt(Math.pow(x - town.getGridX(), 2) + Math.pow(y - town.getGridY(), 2));
+                if (dist < nearestDist && dist < influenceRadius) {
+                    nearestDist = dist;
+                    nearestMajorTown = town;
+                }
+            }
+        }
+        
+        // Also check the starting town
+        if (startingTown != null && startingTown.isMajor()) {
+            double dist = Math.sqrt(Math.pow(x - startingTown.getGridX(), 2) + Math.pow(y - startingTown.getGridY(), 2));
+            if (dist < nearestDist && dist < influenceRadius) {
+                nearestDist = dist;
+                nearestMajorTown = startingTown;
+            }
+        }
+        
+        // If near a major town, generate a derivative name
+        if (nearestMajorTown != null && rand.nextDouble() < 0.6) {  // 60% chance to use town name
+            return generateVillageNameFromTown(nearestMajorTown.getName(), x, y, rand);
+        }
+        
+        // Otherwise use standard terrain-appropriate name
+        return getTerrainAppropriateName(x, y, false);
+    }
+    
+    /**
+     * Generates a village name derived from a nearby major town's name.
+     */
+    private String generateVillageNameFromTown(String townName, int x, int y, Random rand) {
+        String[] suffixes = {"shire", "ham", "ton", "stead", "field", "ford", "wick", "thorpe", "dale", "mere"};
+        String[] prefixes = {"North", "South", "East", "West", "Upper", "Lower", "Old", "New", "Little", "Great"};
+        String[] connectors = {"'s ", " ", "-"};
+        
+        // Extract base name from town (remove common suffixes like -hold, -keep, -castle, etc.)
+        String baseName = townName.replaceAll("(?i)(hold|keep|castle|fort|haven|port|bridge|burg|berg|ton|ham)$", "");
+        if (baseName.isEmpty() || baseName.length() < 3) {
+            baseName = townName;
+        }
+        
+        // Choose naming pattern based on seed
+        int pattern = (x * 31 + y * 17) % 5;
+        
+        switch (pattern) {
+            case 0:  // Prefix + Town base (e.g., "North Stormwind")
+                return prefixes[(x + y) % prefixes.length] + " " + baseName;
+            case 1:  // Town base + suffix (e.g., "Stormshire")
+                return baseName + suffixes[(x * y) % suffixes.length];
+            case 2:  // Town + 's + suffix (e.g., "Stormwind's Dale")
+                return townName + connectors[0] + capitalize(suffixes[(x + y) % suffixes.length]);
+            case 3:  // Prefix + Town (e.g., "Little Stormwind")
+                return prefixes[(x * y + 3) % prefixes.length] + " " + townName;
+            default: // Just "Near [Town]" style name using terrain
+                return getTerrainAppropriateName(x, y, false);
+        }
+    }
+    
+    private String capitalize(String s) {
+        if (s == null || s.isEmpty()) return s;
+        return s.substring(0, 1).toUpperCase() + s.substring(1);
     }
     
     /**
@@ -478,38 +570,48 @@ public class DemoWorld {
     /**
      * Classifies a village based on surrounding terrain.
      * Assigns a VillageType and specific resource.
-     * 
-     * NOTE: Currently forcing ALL villages to be AGRICULTURAL for testing.
-     * To enable other types, uncomment the terrain-based logic below.
      */
     private void classifyVillage(Town town, Random rand) {
         int x = town.getGridX();
         int y = town.getGridY();
         
-        // FOR TESTING: Force all villages to be agricultural
-        VillageType villageType = VillageType.AGRICULTURAL;
-        
-        /* ORIGINAL TERRAIN-BASED LOGIC (uncomment to restore):
         // Check terrain features around the village
         boolean nearWater = distanceToWater(x, y) < 15;
         boolean nearMountain = hasTerrainNearby(x, y, 20, TerrainType.MOUNTAIN, TerrainType.ROCKY_HILLS);
-        boolean nearForest = hasTerrainNearby(x, y, 15, TerrainType.FOREST, TerrainType.DENSE_FOREST);
+        boolean nearForest = hasTerrainNearby(x, y, 15, TerrainType.FOREST, TerrainType.DENSE_FOREST, TerrainType.TAIGA);
         
         TerrainType centerTerrain = worldGen.getTerrain(x, y);
         if (centerTerrain == null) centerTerrain = TerrainType.PLAINS;
         
         // Determine village type based on terrain
-        villageType = VillageType.determineFromTerrain(
+        VillageType villageType = VillageType.determineFromTerrain(
             centerTerrain, nearWater, nearMountain, nearForest, rand
         );
-        */
         
         town.setVillageType(villageType);
         
-        // Assign specific resource for agricultural villages
-        if (villageType == VillageType.AGRICULTURAL) {
-            GrainType grainType = GrainType.randomWeighted(rand);
-            town.setSpecificResource(grainType);
+        // Assign specific resource based on village type
+        switch (villageType) {
+            case AGRICULTURAL:
+                GrainType grainType = GrainType.randomWeighted(rand);
+                town.setSpecificResource(grainType);
+                break;
+            case LUMBER:
+                WoodType woodType = WoodType.random(rand);
+                town.setSpecificResource(woodType);
+                break;
+            case MINING:
+                // Will be assigned stone or ore type during node generation
+                break;
+            case FISHING:
+                FishType fishType = FishType.random(rand);
+                town.setSpecificResource(fishType);
+                break;
+            case PASTORAL:
+                // Future: livestock type
+                break;
+            default:
+                break;
         }
         
         System.out.println("  Village '" + town.getName() + "' classified as " + 
@@ -538,27 +640,75 @@ public class DemoWorld {
         return false;
     }
     
-    // ==================== FARMLAND GENERATION ====================
+    // ==================== RESOURCE NODE GENERATION ====================
     
     /**
-     * Generates farmland nodes around agricultural villages.
+     * Generates all resource nodes around specialized villages.
      */
-    private void generateFarmlandNodes() {
-        farmlandNodes.clear();
-        Random farmRand = new Random(seed + 9999);
+    private void generateAllResourceNodes() {
+        Random resRand = new Random(seed + 9999);
         
-        // Find all agricultural villages
+        // Generate nodes for each village based on type
         for (MapStructure structure : structures) {
             if (structure instanceof Town) {
                 Town town = (Town) structure;
                 
-                // Only agricultural villages get farmland
-                if (town.getVillageType() == VillageType.AGRICULTURAL && !town.isMajor()) {
-                    generateFarmlandAroundVillage(town, farmRand);
+                // Skip major towns - they don't have resource nodes
+                if (town.isMajor()) continue;
+                
+                switch (town.getVillageType()) {
+                    case AGRICULTURAL:
+                        generateFarmlandAroundVillage(town, resRand);
+                        break;
+                    case LUMBER:
+                        generateLumberAroundVillage(town, resRand);
+                        break;
+                    case MINING:
+                        // Mining villages can have either quarry OR ore nodes
+                        if (isNearMountains(town)) {
+                            generateOreAroundVillage(town, resRand);
+                        } else {
+                            generateQuarryAroundVillage(town, resRand);
+                        }
+                        break;
+                    case FISHING:
+                        generateFisheryAroundVillage(town, resRand);
+                        break;
+                    case PASTORAL:
+                        generatePastoralAroundVillage(town, resRand);
+                        break;
+                    default:
+                        // Trading, mixed don't have resource nodes
+                        break;
                 }
             }
         }
     }
+    
+    /**
+     * Checks if a town is near mountainous terrain.
+     */
+    private boolean isNearMountains(Town town) {
+        int cx = town.getGridX() + town.getSize() / 2;
+        int cy = town.getGridY() + town.getSize() / 2;
+        int searchRadius = 15;
+        
+        for (int dy = -searchRadius; dy <= searchRadius; dy++) {
+            for (int dx = -searchRadius; dx <= searchRadius; dx++) {
+                int x = cx + dx;
+                int y = cy + dy;
+                if (x >= 0 && y >= 0 && x < MAP_WIDTH && y < MAP_HEIGHT) {
+                    TerrainType t = worldGen.getTerrain(x, y);
+                    if (t == TerrainType.MOUNTAIN || t == TerrainType.ROCKY_HILLS) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    
+    // === Farmland Generation ===
     
     /**
      * Generates farmland nodes in a tight ring around an agricultural village.
@@ -630,6 +780,378 @@ public class DemoWorld {
                t == TerrainType.SAVANNA;
     }
     
+    // === Lumber Generation ===
+    
+    /**
+     * Generates lumber nodes around forestry villages.
+     */
+    private void generateLumberAroundVillage(Town village, Random rand) {
+        int vx = village.getGridX();
+        int vy = village.getGridY();
+        int vSize = village.getSize();
+        
+        // Get or assign wood type for this village
+        WoodType woodType = WoodType.OAK; // Default
+        if (village.getSpecificResource() instanceof WoodType) {
+            woodType = (WoodType) village.getSpecificResource();
+        } else {
+            // Assign based on terrain/climate
+            woodType = WoodType.random(rand);
+            village.setSpecificResource(woodType);
+        }
+        
+        // Generate 5-8 lumber nodes around the village
+        int nodeCount = 5 + rand.nextInt(4);
+        double baseDistance = vSize + 4;
+        double maxDistance = vSize + 12;
+        
+        for (int i = 0; i < nodeCount; i++) {
+            double angle = (i * Math.PI * 2.0 / nodeCount) + rand.nextDouble() * 0.4;
+            double distance = baseDistance + rand.nextDouble() * (maxDistance - baseDistance);
+            
+            int lx = (int)(vx + vSize/2 + Math.cos(angle) * distance);
+            int ly = (int)(vy + vSize/2 + Math.sin(angle) * distance);
+            
+            if (isValidLumberLocation(lx, ly)) {
+                // Check not too close to other lumber nodes
+                boolean tooClose = false;
+                for (LumberNode existing : lumberNodes) {
+                    double dx = existing.getWorldX() - lx;
+                    double dy = existing.getWorldY() - ly;
+                    if (Math.sqrt(dx*dx + dy*dy) < 8) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                
+                if (!tooClose) {
+                    LumberNode lumber = new LumberNode(lx, ly, woodType, village);
+                    lumberNodes.add(lumber);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Checks if a location is suitable for lumber nodes.
+     * Trees should NOT spawn on rock or mountain tiles.
+     */
+    private boolean isValidLumberLocation(int x, int y) {
+        if (x < 5 || y < 5 || x >= MAP_WIDTH - 5 || y >= MAP_HEIGHT - 5) {
+            return false;
+        }
+        
+        TerrainType t = worldGen.getTerrain(x, y);
+        if (t == null || t.isWater()) return false;
+        
+        // Trees should NOT be on rocky/mountain/desert terrain
+        if (t == TerrainType.MOUNTAIN || t == TerrainType.MOUNTAIN_PEAK ||
+            t == TerrainType.ROCKY_HILLS || t == TerrainType.DESERT ||
+            t == TerrainType.DUNES || t == TerrainType.BEACH ||
+            t == TerrainType.SNOW || t == TerrainType.ICE ||
+            t == TerrainType.GLACIER || t == TerrainType.SWAMP) {
+            return false;
+        }
+        
+        // Good forest terrain - forests, plains, gentle hills
+        return t == TerrainType.FOREST || 
+               t == TerrainType.DENSE_FOREST || 
+               t == TerrainType.TAIGA ||
+               t == TerrainType.PLAINS ||
+               t == TerrainType.GRASS ||
+               t == TerrainType.HILLS ||
+               t == TerrainType.MEADOW;
+    }
+    
+    // === Quarry Generation ===
+    
+    /**
+     * Generates quarry nodes around mining villages (non-mountain).
+     */
+    private void generateQuarryAroundVillage(Town village, Random rand) {
+        int vx = village.getGridX();
+        int vy = village.getGridY();
+        int vSize = village.getSize();
+        
+        // Get or assign stone type for this village
+        StoneType stoneType = StoneType.GRANITE; // Default
+        if (village.getSpecificResource() instanceof StoneType) {
+            stoneType = (StoneType) village.getSpecificResource();
+        } else {
+            stoneType = StoneType.random(rand);
+            village.setSpecificResource(stoneType);
+        }
+        
+        // Generate 4-6 quarry nodes around the village
+        int nodeCount = 4 + rand.nextInt(3);
+        double baseDistance = vSize + 3;
+        double maxDistance = vSize + 10;
+        
+        for (int i = 0; i < nodeCount; i++) {
+            double angle = (i * Math.PI * 2.0 / nodeCount) + rand.nextDouble() * 0.5;
+            double distance = baseDistance + rand.nextDouble() * (maxDistance - baseDistance);
+            
+            int qx = (int)(vx + vSize/2 + Math.cos(angle) * distance);
+            int qy = (int)(vy + vSize/2 + Math.sin(angle) * distance);
+            
+            if (isValidQuarryLocation(qx, qy)) {
+                boolean tooClose = false;
+                for (QuarryNode existing : quarryNodes) {
+                    double dx = existing.getWorldX() - qx;
+                    double dy = existing.getWorldY() - qy;
+                    if (Math.sqrt(dx*dx + dy*dy) < 7) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                
+                if (!tooClose) {
+                    QuarryNode quarry = new QuarryNode(qx, qy, stoneType, village);
+                    quarryNodes.add(quarry);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Checks if a location is suitable for quarry nodes.
+     */
+    private boolean isValidQuarryLocation(int x, int y) {
+        if (x < 5 || y < 5 || x >= MAP_WIDTH - 5 || y >= MAP_HEIGHT - 5) {
+            return false;
+        }
+        
+        TerrainType t = worldGen.getTerrain(x, y);
+        if (t == null || t.isWater()) return false;
+        
+        // Good quarry terrain (rocky, hilly areas)
+        return t == TerrainType.HILLS || 
+               t == TerrainType.ROCKY_HILLS || 
+               t == TerrainType.PLAINS ||
+               t == TerrainType.GRASS;
+    }
+    
+    // === Fishery Generation ===
+    
+    /**
+     * Generates fishery nodes around fishing villages (in water only).
+     */
+    private void generateFisheryAroundVillage(Town village, Random rand) {
+        int vx = village.getGridX();
+        int vy = village.getGridY();
+        int vSize = village.getSize();
+        
+        // Get or assign fish type for this village
+        FishType fishType = FishType.TROUT; // Default
+        if (village.getSpecificResource() instanceof FishType) {
+            fishType = (FishType) village.getSpecificResource();
+        } else {
+            fishType = FishType.random(rand);
+            village.setSpecificResource(fishType);
+        }
+        
+        // Generate 4-7 fishery nodes in nearby water
+        int nodeCount = 4 + rand.nextInt(4);
+        int searchRadius = 20;
+        int nodesPlaced = 0;
+        
+        // Search for water tiles near the village
+        for (int attempt = 0; attempt < 50 && nodesPlaced < nodeCount; attempt++) {
+            double angle = rand.nextDouble() * Math.PI * 2;
+            double distance = (vSize + 3) + rand.nextDouble() * searchRadius;
+            
+            int fx = (int)(vx + vSize/2 + Math.cos(angle) * distance);
+            int fy = (int)(vy + vSize/2 + Math.sin(angle) * distance);
+            
+            if (isValidFisheryLocation(fx, fy)) {
+                boolean tooClose = false;
+                for (FisheryNode existing : fisheryNodes) {
+                    double dx = existing.getWorldX() - fx;
+                    double dy = existing.getWorldY() - fy;
+                    if (Math.sqrt(dx*dx + dy*dy) < 6) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                
+                if (!tooClose) {
+                    FisheryNode fishery = new FisheryNode(fx, fy, fishType, village);
+                    fisheryNodes.add(fishery);
+                    nodesPlaced++;
+                }
+            }
+        }
+    }
+    
+    /**
+     * Checks if a location is suitable for fishery nodes (must be water).
+     */
+    private boolean isValidFisheryLocation(int x, int y) {
+        if (x < 5 || y < 5 || x >= MAP_WIDTH - 5 || y >= MAP_HEIGHT - 5) {
+            return false;
+        }
+        
+        TerrainType t = worldGen.getTerrain(x, y);
+        if (t == null) return false;
+        
+        // Must be water terrain
+        return t == TerrainType.SHALLOW_WATER || 
+               t == TerrainType.OCEAN || 
+               t == TerrainType.DEEP_OCEAN;
+    }
+    
+    // === Ore Generation ===
+    
+    /**
+     * Generates ore nodes around mining villages (mountain areas).
+     */
+    private void generateOreAroundVillage(Town village, Random rand) {
+        int vx = village.getGridX();
+        int vy = village.getGridY();
+        int vSize = village.getSize();
+        
+        // Get or assign ore type for this village
+        OreType oreType = OreType.IRON; // Default
+        if (village.getSpecificResource() instanceof OreType) {
+            oreType = (OreType) village.getSpecificResource();
+        } else {
+            oreType = OreType.random(rand);
+            village.setSpecificResource(oreType);
+        }
+        
+        // Generate 4-7 ore nodes in nearby rocky/mountain areas
+        int nodeCount = 4 + rand.nextInt(4);
+        int searchRadius = 25;
+        int nodesPlaced = 0;
+        
+        // Search for suitable terrain near the village
+        for (int attempt = 0; attempt < 60 && nodesPlaced < nodeCount; attempt++) {
+            double angle = rand.nextDouble() * Math.PI * 2;
+            double distance = (vSize + 3) + rand.nextDouble() * searchRadius;
+            
+            int ox = (int)(vx + vSize/2 + Math.cos(angle) * distance);
+            int oy = (int)(vy + vSize/2 + Math.sin(angle) * distance);
+            
+            if (isValidOreLocation(ox, oy)) {
+                boolean tooClose = false;
+                for (OreNode existing : oreNodes) {
+                    double dx = existing.getWorldX() - ox;
+                    double dy = existing.getWorldY() - oy;
+                    if (Math.sqrt(dx*dx + dy*dy) < 8) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                
+                if (!tooClose) {
+                    OreNode ore = new OreNode(ox, oy, oreType, village);
+                    oreNodes.add(ore);
+                    nodesPlaced++;
+                }
+            }
+        }
+    }
+    
+    /**
+     * Checks if a location is suitable for ore nodes.
+     */
+    private boolean isValidOreLocation(int x, int y) {
+        if (x < 5 || y < 5 || x >= MAP_WIDTH - 5 || y >= MAP_HEIGHT - 5) {
+            return false;
+        }
+        
+        TerrainType t = worldGen.getTerrain(x, y);
+        if (t == null || t.isWater()) return false;
+        
+        // Must be rocky/mountain terrain for ore
+        return t == TerrainType.MOUNTAIN || 
+               t == TerrainType.ROCKY_HILLS || 
+               t == TerrainType.HILLS;
+    }
+    
+    // === Pastoral Node Generation ===
+    
+    /**
+     * Generates pastoral (livestock) nodes around a pastoral village.
+     */
+    private void generatePastoralAroundVillage(Town village, Random rand) {
+        int vx = village.getGridX();
+        int vy = village.getGridY();
+        int vSize = village.getSize();
+        
+        // Get or assign livestock type for this village
+        LivestockType livestockType;
+        if (village.getSpecificResource() instanceof LivestockType) {
+            livestockType = (LivestockType) village.getSpecificResource();
+        } else {
+            // Determine best livestock for terrain
+            TerrainType t = worldGen.getTerrain(vx + vSize/2, vy + vSize/2);
+            livestockType = LivestockType.forTerrain(t);
+            village.setSpecificResource(livestockType);
+        }
+        
+        // Generate 3-5 pastoral nodes (grazing areas)
+        int nodeCount = 3 + rand.nextInt(3);
+        int nodesPlaced = 0;
+        int searchRadius = 20;
+        
+        for (int attempt = 0; attempt < 50 && nodesPlaced < nodeCount; attempt++) {
+            double angle = rand.nextDouble() * Math.PI * 2;
+            double distance = (vSize + 4) + rand.nextDouble() * searchRadius;
+            
+            int px = (int)(vx + vSize/2 + Math.cos(angle) * distance);
+            int py = (int)(vy + vSize/2 + Math.sin(angle) * distance);
+            
+            if (isValidPastoralLocation(px, py)) {
+                // Check not too close to existing pastoral nodes
+                boolean tooClose = false;
+                for (PastoralNode existing : pastoralNodes) {
+                    double dx = existing.getWorldX() - px;
+                    double dy = existing.getWorldY() - py;
+                    if (Math.sqrt(dx*dx + dy*dy) < 10) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                
+                if (!tooClose) {
+                    PastoralNode pastoral = new PastoralNode(px, py, livestockType, village);
+                    pastoralNodes.add(pastoral);
+                    nodesPlaced++;
+                }
+            }
+        }
+    }
+    
+    /**
+     * Checks if a location is suitable for pastoral nodes (grazing land).
+     * Animals should NOT spawn on rock or mountain tiles.
+     */
+    private boolean isValidPastoralLocation(int x, int y) {
+        if (x < 5 || y < 5 || x >= MAP_WIDTH - 5 || y >= MAP_HEIGHT - 5) {
+            return false;
+        }
+        
+        TerrainType t = worldGen.getTerrain(x, y);
+        if (t == null || t.isWater()) return false;
+        
+        // Animals should NOT be on rocky/mountain terrain
+        if (t == TerrainType.MOUNTAIN || t == TerrainType.MOUNTAIN_PEAK ||
+            t == TerrainType.ROCKY_HILLS || t == TerrainType.DESERT ||
+            t == TerrainType.DUNES || t == TerrainType.SNOW ||
+            t == TerrainType.ICE || t == TerrainType.GLACIER) {
+            return false;
+        }
+        
+        // Pastoral nodes need grassland, plains, or gentle hills
+        return t == TerrainType.GRASS || 
+               t == TerrainType.PLAINS || 
+               t == TerrainType.MEADOW ||
+               t == TerrainType.HILLS ||
+               t == TerrainType.SAVANNA ||
+               t == TerrainType.FOREST;
+    }
+    
     // ==================== PUBLIC ACCESSORS ====================
     
     public TerrainGenerator getTerrain() {
@@ -657,6 +1179,55 @@ public class DemoWorld {
      */
     public List<FarmlandNode> getFarmlandNodes() {
         return farmlandNodes;
+    }
+    
+    /**
+     * Gets all lumber nodes in the world.
+     */
+    public List<LumberNode> getLumberNodes() {
+        return lumberNodes;
+    }
+    
+    /**
+     * Gets all quarry nodes in the world.
+     */
+    public List<QuarryNode> getQuarryNodes() {
+        return quarryNodes;
+    }
+    
+    /**
+     * Gets all fishery nodes in the world.
+     */
+    public List<FisheryNode> getFisheryNodes() {
+        return fisheryNodes;
+    }
+    
+    /**
+     * Gets all ore nodes in the world.
+     */
+    public List<OreNode> getOreNodes() {
+        return oreNodes;
+    }
+    
+    /**
+     * Gets all pastoral (livestock) nodes in the world.
+     */
+    public List<PastoralNode> getPastoralNodes() {
+        return pastoralNodes;
+    }
+    
+    /**
+     * Gets all resource nodes of any type in the world (excluding farmland which has specialized handling).
+     */
+    public List<ResourceNodeBase> getAllResourceNodes() {
+        List<ResourceNodeBase> all = new ArrayList<>();
+        // Note: farmlandNodes excluded as they don't extend ResourceNodeBase
+        all.addAll(lumberNodes);
+        all.addAll(quarryNodes);
+        all.addAll(fisheryNodes);
+        all.addAll(oreNodes);
+        all.addAll(pastoralNodes);
+        return all;
     }
     
     /**

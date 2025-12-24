@@ -82,6 +82,19 @@ public class GameSettings {
     private double zoomSpeed = 1.0;
     private boolean moveToInteract = true; // Right-click moves player to interactable objects
     
+    // New graphics/gameplay settings
+    private boolean basicGraphicsMode = false; // Simple textures, no decorations, no animations
+    private boolean showGrid = true;           // Show map grid
+    private boolean instantTownMenu = false;   // Skip guard conversation, open town menu directly
+    private double gameSpeed = 1.0;            // Game speed multiplier (0.5x, 1.0x, 2.0x, 4.0x)
+    private boolean teleportCheatEnabled = false; // Allow ctrl+click teleport cheat
+    
+    // Game speed presets
+    public static final double SPEED_HALF = 0.5;
+    public static final double SPEED_NORMAL = 1.0;
+    public static final double SPEED_FAST = 2.0;
+    public static final double SPEED_FASTEST = 4.0;
+    
     // Listeners for settings changes
     private Runnable onSettingsChanged;
     
@@ -109,6 +122,11 @@ public class GameSettings {
     public double getScrollSpeed() { return scrollSpeed; }
     public double getZoomSpeed() { return zoomSpeed; }
     public boolean isMoveToInteract() { return moveToInteract; }
+    public boolean isBasicGraphicsMode() { return basicGraphicsMode; }
+    public boolean isShowGrid() { return showGrid; }
+    public boolean isInstantTownMenu() { return instantTownMenu; }
+    public double getGameSpeed() { return gameSpeed; }
+    public boolean isTeleportCheatEnabled() { return teleportCheatEnabled; }
     
     // ==================== Setters ====================
     
@@ -167,6 +185,67 @@ public class GameSettings {
         notifyChanged();
     }
     
+    public void setBasicGraphicsMode(boolean basicGraphicsMode) {
+        this.basicGraphicsMode = basicGraphicsMode;
+        notifyChanged();
+    }
+    
+    public void setShowGrid(boolean showGrid) {
+        this.showGrid = showGrid;
+        notifyChanged();
+    }
+    
+    public void setInstantTownMenu(boolean instantTownMenu) {
+        this.instantTownMenu = instantTownMenu;
+        notifyChanged();
+    }
+    
+    public void setGameSpeed(double speed) {
+        // Clamp to valid presets
+        if (speed <= SPEED_HALF) {
+            this.gameSpeed = SPEED_HALF;
+        } else if (speed >= SPEED_FASTEST) {
+            this.gameSpeed = SPEED_FASTEST;
+        } else if (speed >= SPEED_FAST) {
+            this.gameSpeed = SPEED_FAST;
+        } else {
+            this.gameSpeed = SPEED_NORMAL;
+        }
+        notifyChanged();
+    }
+
+    public void setTeleportCheatEnabled(boolean enabled) {
+        this.teleportCheatEnabled = enabled;
+        notifyChanged();
+    }
+    
+    /**
+     * Cycles to the next game speed preset.
+     * 0.5x -> 1.0x -> 2.0x -> 4.0x -> 0.5x
+     */
+    public void cycleGameSpeed() {
+        if (gameSpeed <= SPEED_HALF) {
+            gameSpeed = SPEED_NORMAL;
+        } else if (gameSpeed <= SPEED_NORMAL) {
+            gameSpeed = SPEED_FAST;
+        } else if (gameSpeed <= SPEED_FAST) {
+            gameSpeed = SPEED_FASTEST;
+        } else {
+            gameSpeed = SPEED_HALF;
+        }
+        notifyChanged();
+    }
+    
+    /**
+     * Gets display name for current game speed.
+     */
+    public String getGameSpeedName() {
+        if (gameSpeed <= SPEED_HALF) return "0.5x (Slow)";
+        if (gameSpeed <= SPEED_NORMAL) return "1.0x (Normal)";
+        if (gameSpeed <= SPEED_FAST) return "2.0x (Fast)";
+        return "4.0x (Fastest)";
+    }
+
     public void setOnSettingsChanged(Runnable callback) {
         this.onSettingsChanged = callback;
     }
@@ -193,6 +272,11 @@ public class GameSettings {
         props.setProperty("scrollSpeed", String.valueOf(scrollSpeed));
         props.setProperty("zoomSpeed", String.valueOf(zoomSpeed));
         props.setProperty("moveToInteract", String.valueOf(moveToInteract));
+        props.setProperty("basicGraphicsMode", String.valueOf(basicGraphicsMode));
+        props.setProperty("showGrid", String.valueOf(showGrid));
+        props.setProperty("instantTownMenu", String.valueOf(instantTownMenu));
+        props.setProperty("gameSpeed", String.valueOf(gameSpeed));
+        props.setProperty("teleportCheatEnabled", String.valueOf(teleportCheatEnabled));
         
         try (FileOutputStream fos = new FileOutputStream(SETTINGS_FILE)) {
             props.store(fos, "LogiMap Game Settings");
@@ -222,6 +306,11 @@ public class GameSettings {
             scrollSpeed = Double.parseDouble(props.getProperty("scrollSpeed", "1.0"));
             zoomSpeed = Double.parseDouble(props.getProperty("zoomSpeed", "1.0"));
             moveToInteract = Boolean.parseBoolean(props.getProperty("moveToInteract", "true"));
+            basicGraphicsMode = Boolean.parseBoolean(props.getProperty("basicGraphicsMode", "false"));
+            showGrid = Boolean.parseBoolean(props.getProperty("showGrid", "true"));
+            instantTownMenu = Boolean.parseBoolean(props.getProperty("instantTownMenu", "false"));
+            gameSpeed = Double.parseDouble(props.getProperty("gameSpeed", "1.0"));
+            teleportCheatEnabled = Boolean.parseBoolean(props.getProperty("teleportCheatEnabled", "false"));
             
         } catch (IOException | NumberFormatException e) {
             System.err.println("Failed to load settings: " + e.getMessage());
@@ -243,6 +332,11 @@ public class GameSettings {
         scrollSpeed = 1.0;
         zoomSpeed = 1.0;
         moveToInteract = true;
+        basicGraphicsMode = false;
+        showGrid = true;
+        instantTownMenu = false;
+        gameSpeed = SPEED_NORMAL;
+        teleportCheatEnabled = false;
         notifyChanged();
     }
 }

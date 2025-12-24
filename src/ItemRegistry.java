@@ -249,6 +249,151 @@ public class ItemRegistry {
             Color.web("#a08848"), Color.web("#887030"), "🌾"
         ));
         
+        // === Timber Materials ===
+        register(new Item(
+            "timber_oak", "Oak Wood",
+            "Sturdy oak timber. A versatile building material.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 50, 8,
+            Color.web("#8b6914"), Color.web("#2d4a1c"), "🪵"
+        ));
+        
+        register(new Item(
+            "timber_birch", "Birch Wood",
+            "Light birch timber with distinctive white bark.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 50, 7,
+            Color.web("#f5f5f0"), Color.web("#90b868"), "🪵"
+        ));
+        
+        register(new Item(
+            "timber_pine", "Pine Wood",
+            "Fragrant pine timber. Popular for construction.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 50, 6,
+            Color.web("#4a3520"), Color.web("#2a4a30"), "🪵"
+        ));
+        
+        register(new Item(
+            "timber_maple", "Maple Wood",
+            "Beautiful maple timber with rich coloring.",
+            Item.Category.MATERIAL, Item.Rarity.UNCOMMON, 50, 12,
+            Color.web("#c06030"), Color.web("#d02000"), "🪵"
+        ));
+        
+        // === Stone Materials ===
+        register(new Item(
+            "stone_granite", "Granite",
+            "Durable pink-speckled granite. Excellent for foundations.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 30, 15,
+            Color.web("#9e8e7e"), Color.web("#c4a090"), "🪨"
+        ));
+        
+        register(new Item(
+            "stone_limestone", "Limestone",
+            "Pale limestone blocks. Common building stone.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 30, 12,
+            Color.web("#e8e0c8"), Color.web("#d8d0b8"), "🪨"
+        ));
+        
+        register(new Item(
+            "stone_slate", "Slate",
+            "Dark layered slate. Perfect for roofing.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 30, 14,
+            Color.web("#4a5058"), Color.web("#384048"), "🪨"
+        ));
+        
+        register(new Item(
+            "stone_sandstone", "Sandstone",
+            "Warm-colored sandstone. Easy to carve.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 30, 10,
+            Color.web("#d4b483"), Color.web("#c4a473"), "🪨"
+        ));
+        
+        // === Fish Materials ===
+        register(new Item(
+            "fish_trout", "Trout",
+            "Fresh river trout. A common catch.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 20, 8,
+            Color.web("#6b8e6b"), Color.web("#f0e0d0"), "🐟"
+        ));
+        
+        register(new Item(
+            "fish_salmon", "Salmon",
+            "Pink-fleshed salmon. Prized for its taste.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 20, 12,
+            Color.web("#fa8072"), Color.web("#f0e0d0"), "🐟"
+        ));
+        
+        register(new Item(
+            "fish_bass", "Bass",
+            "Large freshwater bass. Good eating.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 20, 10,
+            Color.web("#2f4f4f"), Color.web("#c0c0c0"), "🐟"
+        ));
+        
+        register(new Item(
+            "fish_catfish", "Catfish",
+            "Whiskered bottom-dweller. Meaty and filling.",
+            Item.Category.MATERIAL, Item.Rarity.UNCOMMON, 20, 14,
+            Color.web("#454545"), Color.web("#f0e0d0"), "🐟"
+        ));
+        
+        // === Ore Materials ===
+        register(new Item(
+            "ore_copper", "Copper Ore",
+            "Raw copper ore with green oxidation. Easy to smelt.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 30, 18,
+            Color.web("#b87333"), Color.web("#50c878"), "⛏"
+        ));
+        
+        register(new Item(
+            "ore_tin", "Tin Ore",
+            "Silvery tin ore. Combined with copper for bronze.",
+            Item.Category.MATERIAL, Item.Rarity.COMMON, 30, 20,
+            Color.web("#d4d4d4"), Color.web("#a0a0a0"), "⛏"
+        ));
+        
+        register(new Item(
+            "ore_iron", "Iron Ore",
+            "Rich iron ore. Essential for steel production.",
+            Item.Category.MATERIAL, Item.Rarity.UNCOMMON, 30, 25,
+            Color.web("#8b4513"), Color.web("#708090"), "⛏"
+        ));
+        
+        register(new Item(
+            "ore_zinc", "Zinc Ore",
+            "Bluish zinc ore. Used in brass alloys.",
+            Item.Category.MATERIAL, Item.Rarity.UNCOMMON, 30, 22,
+            Color.web("#a0b0c0"), Color.web("#7a8a9a"), "⛏"
+        ));
+        
+        // === Meat (from Pastoral Villages) ===
+        register(new Item(
+            "meat_mutton", "Mutton",
+            "Tender meat from sheep. A staple of pastoral communities.",
+            Item.Category.CONSUMABLE, Item.Rarity.COMMON, 20, 12,
+            Color.web("#d4a098"), Color.web("#a08078"), "🍖"
+        ));
+        
+        register(new Item(
+            "meat_beef", "Beef",
+            "Quality beef from cattle. Hearty and filling.",
+            Item.Category.CONSUMABLE, Item.Rarity.COMMON, 20, 18,
+            Color.web("#8b4534"), Color.web("#654321"), "🍖"
+        ));
+        
+        register(new Item(
+            "meat_pork", "Pork",
+            "Fresh pork from pigs. Versatile in cooking.",
+            Item.Category.CONSUMABLE, Item.Rarity.COMMON, 20, 15,
+            Color.web("#ffb6a0"), Color.web("#d4a088"), "🍖"
+        ));
+        
+        register(new Item(
+            "meat_chicken", "Chicken",
+            "Poultry meat. Light and easy to prepare.",
+            Item.Category.CONSUMABLE, Item.Rarity.COMMON, 20, 10,
+            Color.web("#f5e0c8"), Color.web("#d4c0a8"), "🍗"
+        ));
+        
         // === Tools ===
         register(new Item(
             "pickaxe", "Iron Pickaxe",

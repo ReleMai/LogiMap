@@ -3,8 +3,10 @@ import javafx.scene.paint.Color;
 /**
  * Game time system managing day/night cycle, time passage, and time-based events.
  * 
- * Time flows at an accelerated rate: 1 real second = configurable game minutes.
+ * Time flows constantly at: 2 real seconds = 1 game minute (configurable)
  * A full day is 24 game hours (1440 game minutes).
+ * 
+ * Calendar starts at January 1st, 500 AD.
  * 
  * Sun rises in the WEST (left side of map) at 6:00
  * Sun sets in the EAST (right side of map) at 20:00
@@ -15,6 +17,15 @@ public class GameTime {
     public static final int MINUTES_PER_HOUR = 60;
     public static final int HOURS_PER_DAY = 24;
     public static final int MINUTES_PER_DAY = MINUTES_PER_HOUR * HOURS_PER_DAY; // 1440
+    public static final int DAYS_PER_MONTH = 30; // Simplified 30-day months
+    public static final int MONTHS_PER_YEAR = 12;
+    public static final int DAYS_PER_YEAR = DAYS_PER_MONTH * MONTHS_PER_YEAR; // 360
+    
+    // Month names for display
+    private static final String[] MONTH_NAMES = {
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    };
     
     // Time of day thresholds (in hours)
     public static final int DAWN_START = 5;      // 5:00 AM - Dawn begins
@@ -27,18 +38,29 @@ public class GameTime {
     public static final int NIGHT = 21;          // 9:00 PM - Full night
     
     // Time flow rate: real milliseconds per game minute
-    // Default: 1000ms (1 second) = 1 game minute, so 24 real minutes = 1 game day
-    private double realMsPerGameMinute = 1000.0;
+    // Default: 2000ms (2 seconds) = 1 game minute, so 48 real minutes = 1 game day
+    private double realMsPerGameMinute = 2000.0;
+    
+    // Calendar state - starting at January 1st, 500 AD
+    private int currentYear = 500;
+    private int currentMonth = 1;   // 1-12
+    private int currentDayOfMonth = 1; // 1-30
     
     // Current time state
-    private int currentDay = 1;
+    private int currentDay = 1;       // Cumulative day counter (for internal use)
     private int currentHour = 8;      // Start at 8:00 AM
     private int currentMinute = 0;
     private double minuteFraction = 0; // Accumulated sub-minute time
     
     // Time flow control
     private boolean paused = false;
-    private double timeMultiplier = 1.0; // Can speed up/slow down time
+    private double timeMultiplier = 1.0; // 1.0 = normal, 2.0 = double speed
+    private boolean constantFlow = true;  // Whether time flows constantly
+    
+    // Speed presets
+    public static final double SPEED_NORMAL = 1.0;
+    public static final double SPEED_FAST = 2.0;
+    public static final double SPEED_PAUSED = 0.0;
     
     // Cached values for rendering
     private TimeOfDay cachedTimeOfDay = TimeOfDay.MORNING;
@@ -77,7 +99,7 @@ public class GameTime {
     }
     
     /**
-     * Creates a new game time system starting at day 1, 8:00 AM.
+     * Creates a new game time system starting at January 1st, 500 AD, 8:00 AM.
      */
     public GameTime() {
         updateCachedValues();
@@ -85,12 +107,29 @@ public class GameTime {
     
     /**
      * Creates a game time system with custom starting time.
+     * @param year The year (e.g., 500 for 500 AD)
+     * @param month The month (1-12)
+     * @param dayOfMonth The day of the month (1-30)
+     * @param hour The hour (0-23)
+     * @param minute The minute (0-59)
      */
-    public GameTime(int day, int hour, int minute) {
-        this.currentDay = day;
-        this.currentHour = hour;
-        this.currentMinute = minute;
+    public GameTime(int year, int month, int dayOfMonth, int hour, int minute) {
+        this.currentYear = year;
+        this.currentMonth = Math.max(1, Math.min(12, month));
+        this.currentDayOfMonth = Math.max(1, Math.min(30, dayOfMonth));
+        this.currentHour = hour % HOURS_PER_DAY;
+        this.currentMinute = minute % MINUTES_PER_HOUR;
+        recalculateCumulativeDay();
         updateCachedValues();
+    }
+    
+    /**
+     * Recalculates the cumulative day counter from year/month/day.
+     */
+    private void recalculateCumulativeDay() {
+        currentDay = (currentYear - 500) * DAYS_PER_YEAR + 
+                     (currentMonth - 1) * DAYS_PER_MONTH + 
+                     currentDayOfMonth;
     }
     
     // ==================== TIME ADVANCEMENT ====================
@@ -132,7 +171,25 @@ public class GameTime {
         currentHour++;
         if (currentHour >= HOURS_PER_DAY) {
             currentHour = 0;
-            currentDay++;
+            advanceDay();
+        }
+    }
+    
+    /**
+     * Advances the calendar by one day.
+     */
+    private void advanceDay() {
+        currentDay++;
+        currentDayOfMonth++;
+        
+        if (currentDayOfMonth > DAYS_PER_MONTH) {
+            currentDayOfMonth = 1;
+            currentMonth++;
+            
+            if (currentMonth > MONTHS_PER_YEAR) {
+                currentMonth = 1;
+                currentYear++;
+            }
         }
     }
     
@@ -327,10 +384,40 @@ public class GameTime {
     }
     
     /**
-     * Gets the formatted time with day (e.g., "Day 1 - 8:30 AM").
+     * Gets the formatted date string (e.g., "January 1st, 500 AD").
+     */
+    public String getFormattedDate() {
+        String monthName = MONTH_NAMES[currentMonth - 1];
+        String daySuffix = getDaySuffix(currentDayOfMonth);
+        return String.format("%s %d%s, %d AD", monthName, currentDayOfMonth, daySuffix, currentYear);
+    }
+    
+    /**
+     * Gets a short formatted date (e.g., "Jan 1, 500").
+     */
+    public String getFormattedDateShort() {
+        String monthName = MONTH_NAMES[currentMonth - 1].substring(0, 3);
+        return String.format("%s %d, %d", monthName, currentDayOfMonth, currentYear);
+    }
+    
+    /**
+     * Gets the day suffix (st, nd, rd, th).
+     */
+    private String getDaySuffix(int day) {
+        if (day >= 11 && day <= 13) return "th";
+        switch (day % 10) {
+            case 1: return "st";
+            case 2: return "nd";
+            case 3: return "rd";
+            default: return "th";
+        }
+    }
+    
+    /**
+     * Gets the formatted time with date (e.g., "Jan 1, 500 AD - 8:30 AM").
      */
     public String getFormattedDateTime() {
-        return "Day " + currentDay + " - " + getFormattedTime();
+        return getFormattedDateShort() + " - " + getFormattedTime();
     }
     
     /**
@@ -338,6 +425,16 @@ public class GameTime {
      */
     public String getFormattedTimeOfDay() {
         return cachedTimeOfDay.getDisplayName();
+    }
+    
+    /**
+     * Gets the current season based on month.
+     */
+    public String getSeason() {
+        if (currentMonth >= 3 && currentMonth <= 5) return "Spring";
+        if (currentMonth >= 6 && currentMonth <= 8) return "Summer";
+        if (currentMonth >= 9 && currentMonth <= 11) return "Autumn";
+        return "Winter";
     }
     
     /**
@@ -362,6 +459,15 @@ public class GameTime {
         }
     }
     
+    /**
+     * Gets a description of the current time speed.
+     */
+    public String getSpeedDescription() {
+        if (paused) return "Paused";
+        if (timeMultiplier >= 2.0) return "2x Speed";
+        return "Normal";
+    }
+    
     // ==================== CACHED VALUE UPDATE ====================
     
     /**
@@ -380,6 +486,40 @@ public class GameTime {
     public void togglePause() { paused = !paused; }
     public boolean isPaused() { return paused; }
     
+    /**
+     * Sets time speed to normal (1x).
+     */
+    public void setNormalSpeed() {
+        this.timeMultiplier = SPEED_NORMAL;
+        this.paused = false;
+    }
+    
+    /**
+     * Sets time speed to fast (2x).
+     */
+    public void setFastSpeed() {
+        this.timeMultiplier = SPEED_FAST;
+        this.paused = false;
+    }
+    
+    /**
+     * Toggles between normal and fast speed.
+     */
+    public void toggleSpeed() {
+        if (timeMultiplier >= SPEED_FAST) {
+            setNormalSpeed();
+        } else {
+            setFastSpeed();
+        }
+    }
+    
+    /**
+     * Checks if time is running at 2x speed.
+     */
+    public boolean isFastSpeed() {
+        return timeMultiplier >= SPEED_FAST && !paused;
+    }
+    
     public void setTimeMultiplier(double multiplier) { 
         this.timeMultiplier = Math.max(0.1, Math.min(10.0, multiplier)); 
     }
@@ -389,11 +529,23 @@ public class GameTime {
         this.realMsPerGameMinute = Math.max(100, ms);
     }
     
+    public void setConstantFlow(boolean enabled) {
+        this.constantFlow = enabled;
+    }
+    
+    public boolean isConstantFlow() {
+        return constantFlow;
+    }
+    
     // ==================== GETTERS ====================
     
     public int getCurrentDay() { return currentDay; }
     public int getCurrentHour() { return currentHour; }
     public int getCurrentMinute() { return currentMinute; }
+    public int getCurrentYear() { return currentYear; }
+    public int getCurrentMonth() { return currentMonth; }
+    public int getCurrentDayOfMonth() { return currentDayOfMonth; }
+    public String getCurrentMonthName() { return MONTH_NAMES[currentMonth - 1]; }
     
     /**
      * Gets total minutes since day 1, 00:00.
@@ -409,6 +561,19 @@ public class GameTime {
         this.currentDay = Math.max(1, day);
         this.currentHour = hour % HOURS_PER_DAY;
         this.currentMinute = minute % MINUTES_PER_HOUR;
+        updateCachedValues();
+    }
+    
+    /**
+     * Sets the full date and time.
+     */
+    public void setDateTime(int year, int month, int dayOfMonth, int hour, int minute) {
+        this.currentYear = year;
+        this.currentMonth = Math.max(1, Math.min(12, month));
+        this.currentDayOfMonth = Math.max(1, Math.min(30, dayOfMonth));
+        this.currentHour = hour % HOURS_PER_DAY;
+        this.currentMinute = minute % MINUTES_PER_HOUR;
+        recalculateCumulativeDay();
         updateCachedValues();
     }
 }

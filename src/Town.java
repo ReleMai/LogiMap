@@ -17,7 +17,14 @@ public class Town extends MapStructure {
     private VillageType villageType;
     private Object specificResource; // e.g., GrainType.WHEAT for agricultural
     private boolean hasInn = false;
-    private int innCost = 5; // Gold cost for instant rest
+    private int innCost = 2; // Gold cost for instant rest (reduced from 5)
+    
+    // Town warehouse for player storage
+    private TownWarehouse warehouse;
+    
+    // Tavern NPCs available for hire
+    private TavernNPC[] tavernNPCs;
+    private boolean tavernPopulated = false;
     
     public Town(int gridX, int gridY, String name, boolean isMajor) {
         super(gridX, gridY, name, isMajor ? 8 : 4, 
@@ -37,6 +44,9 @@ public class Town extends MapStructure {
             this.villageType = VillageType.AGRICULTURAL; // Default, should be set properly
             this.hasInn = false;
         }
+        
+        // Initialize warehouse
+        this.warehouse = new TownWarehouse(name, isMajor);
     }
     
     /**
@@ -54,6 +64,9 @@ public class Town extends MapStructure {
         this.tradeValue = 50 + Math.random() * 100;
         this.hasInn = Math.random() < 0.3; // 30% of villages have inns
         this.innCost = 2; // Cheaper than cities
+        
+        // Initialize warehouse
+        this.warehouse = new TownWarehouse(name, false);
     }
     
     public boolean isMajor() {
@@ -91,6 +104,20 @@ public class Town extends MapStructure {
     }
     
     /**
+     * Gets the town warehouse for player storage.
+     */
+    public TownWarehouse getWarehouse() {
+        return warehouse;
+    }
+    
+    /**
+     * Sets the town warehouse (used during save loading).
+     */
+    public void setWarehouse(TownWarehouse warehouse) {
+        this.warehouse = warehouse;
+    }
+    
+    /**
      * Gets the rest location type for this town.
      */
     public PlayerEnergy.RestLocation getRestLocation() {
@@ -99,6 +126,66 @@ public class Town extends MapStructure {
                           : PlayerEnergy.RestLocation.VILLAGE_INN;
         }
         return PlayerEnergy.RestLocation.VILLAGE_OUTDOORS;
+    }
+    
+    /**
+     * Gets the tavern NPCs available for hire.
+     * Generates them on first access (lazy loading).
+     */
+    public TavernNPC[] getTavernNPCs() {
+        if (!tavernPopulated) {
+            generateTavernNPCs();
+        }
+        return tavernNPCs;
+    }
+    
+    /**
+     * Generates tavern NPCs based on town size and type.
+     */
+    private void generateTavernNPCs() {
+        // Determine number of NPCs based on town type
+        int npcCount;
+        if (isMajor) {
+            // Major towns have more recruits (4-8)
+            npcCount = 4 + (int)(Math.random() * 5);
+        } else if (hasInn()) {
+            // Villages with inns have some recruits (2-4)
+            npcCount = 2 + (int)(Math.random() * 3);
+        } else {
+            // Small villages have few recruits (1-2)
+            npcCount = 1 + (int)(Math.random() * 2);
+        }
+        
+        // Generate a balanced group for major towns, random for villages
+        if (isMajor) {
+            tavernNPCs = TavernNPC.generateBalancedGroup(npcCount);
+        } else {
+            tavernNPCs = TavernNPC.generateTavernNPCs(npcCount);
+        }
+        
+        tavernPopulated = true;
+    }
+    
+    /**
+     * Refreshes the tavern NPCs (called when time passes or player revisits).
+     * Keeps hired NPCs tracked but generates new available ones.
+     */
+    public void refreshTavernNPCs() {
+        // In future: could track hired NPCs separately
+        // For now, just regenerate
+        tavernPopulated = false;
+    }
+    
+    /**
+     * Gets the number of available (unhired) NPCs in the tavern.
+     */
+    public int getAvailableNPCCount() {
+        if (tavernNPCs == null) return 0;
+        int count = 0;
+        for (TavernNPC npc : tavernNPCs) {
+            if (!npc.isHired()) count++;
+        }
+        return count;
     }
     
     /**

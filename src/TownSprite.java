@@ -149,12 +149,16 @@ public class TownSprite {
         }
         
         // Draw village type icon/decoration in center
-        renderVillageTypeDecoration(gc, x, y, size, villageType);
+        // Removed: renderVillageTypeDecoration(gc, x, y, size, villageType);
+        // Villages now appear cleaner without overlay icons
     }
     
     /**
      * Renders a decoration specific to the village type.
+     * NOTE: Currently disabled for cleaner sprite appearance.
+     * Can be re-enabled by calling this method from renderVillageWithType.
      */
+    @SuppressWarnings("unused")
     private static void renderVillageTypeDecoration(GraphicsContext gc, double x, double y, double size, VillageType villageType) {
         double centerX = x + size * 0.45;
         double centerY = y + size * 0.43;

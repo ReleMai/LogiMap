@@ -48,7 +48,14 @@ public class WorldSaveManager {
                 ssd.productivity = structure.getProductivity();
                 
                 if (structure instanceof Town) {
-                    ssd.isMajor = ((Town) structure).isMajor();
+                    Town town = (Town) structure;
+                    ssd.isMajor = town.isMajor();
+                    
+                    // Save warehouse data
+                    TownWarehouse warehouse = town.getWarehouse();
+                    if (warehouse != null && warehouse.isPurchased()) {
+                        ssd.warehouseData = warehouse.toMap();
+                    }
                 }
                 
                 data.structures.add(ssd);
@@ -189,6 +196,16 @@ public class WorldSaveManager {
                     structure.getName().equals(ssd.name)) {
                     structure.setPopulation(ssd.population);
                     structure.setProductivity(ssd.productivity);
+                    
+                    // Restore warehouse data for towns
+                    if (structure instanceof Town && ssd.warehouseData != null) {
+                        Town town = (Town) structure;
+                        TownWarehouse warehouse = TownWarehouse.fromMap(ssd.warehouseData);
+                        if (warehouse != null) {
+                            town.setWarehouse(warehouse);
+                        }
+                    }
+                    
                     break;
                 }
             }
@@ -226,7 +243,7 @@ public class WorldSaveManager {
      * Structure save data.
      */
     public static class StructureSaveData implements Serializable {
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
         
         public String type;
         public String name;
@@ -235,6 +252,9 @@ public class WorldSaveManager {
         public double population;
         public double productivity;
         public boolean isMajor;
+        
+        // Warehouse data
+        public Map<String, Object> warehouseData;
     }
     
     /**

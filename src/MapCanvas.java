@@ -36,6 +36,7 @@ public class MapCanvas {
     // World data
     private final DemoWorld world;
     private MapFilter currentFilter;
+    private NPCManager npcManager;
     
     // Interaction state
     private double lastMouseX;
@@ -51,13 +52,19 @@ public class MapCanvas {
     private PlayerSprite player;
     private MovementFlag movementFlag;
     private Consumer<Town> onTownInteraction;  // Callback when player arrives at a town
+    private Consumer<NPC> onNPCInteraction;    // Callback when player interacts with an NPC
     private Town pendingTownInteraction = null;  // Town to interact with when player arrives
-    private FarmlandNode pendingFarmlandInteraction = null;  // Farmland to interact with when player arrives
+    private NPC pendingNPCInteraction = null;    // NPC to talk to when player arrives
+    private ResourceNodeBase pendingResourceInteraction = null;  // Resource node to interact with
+    private FarmlandNode pendingFarmlandInteraction = null;  // Farmland node (separate from ResourceNodeBase)
     
     // Game systems
     private GameTime gameTime;
     private PlayerEnergy playerEnergy;
     private FarmlandInteraction farmlandInteraction;
+    private ResourceInteraction resourceInteraction;  // Generic resource interaction menu
+    private ActionProgress actionProgress;  // Timed action progress system
+    private TerrainRenderer terrainRenderer;  // Professional terrain rendering
     
     // Tooltip state
     private boolean ctrlHeld = false;
@@ -69,6 +76,10 @@ public class MapCanvas {
     // Grid display options
     private double gridBrightness = 1.0;
     private boolean showGridNumbers = false;
+    
+    // Camera follow state
+    private boolean cameraFollowPlayer = false;  // Whether camera is following player
+    private static final double CAMERA_FOLLOW_SMOOTHNESS = 5.0;  // Lower = smoother
     
     // Style constants
     private static final Color GRID_LINE_COLOR = Color.web("#505050");
@@ -104,14 +115,31 @@ public class MapCanvas {
         
         this.world = world;
         currentFilter = new StandardFilter();
+        npcManager = new NPCManager();
+        npcManager.populateAllTowns(world.getTowns());
+        npcManager.spawnRoamers(world.getTowns());
         
         // Initialize movement flag
         this.movementFlag = new MovementFlag();
+        
+        // Initialize terrain renderer with world seed
+        this.terrainRenderer = new TerrainRenderer(world.getSeed());
         
         // Initialize game systems
         this.gameTime = new GameTime();
         this.playerEnergy = new PlayerEnergy();
         this.farmlandInteraction = new FarmlandInteraction(gameTime, playerEnergy);
+        this.resourceInteraction = new ResourceInteraction(gameTime, playerEnergy);
+        this.actionProgress = new ActionProgress(gameTime);
+        
+        // Set up action progress with player reference for movement lock
+        this.actionProgress.setPlayer(player);
+        
+        // Set up resource interaction to use action progress
+        this.resourceInteraction.setActionProgress(actionProgress);
+        
+        // Set up farmland interaction to use action progress (timer)
+        this.farmlandInteraction.setActionProgress(actionProgress);
         
         // Set up farmland harvest callback
         this.farmlandInteraction.setHarvestCallback((farmland, yield, grainType) -> {
@@ -124,6 +152,21 @@ public class MapCanvas {
                     ItemStack remaining = player.getInventory().addItem(stack);
                     if (remaining != null && !remaining.isEmpty()) {
                         System.out.println("Inventory full! " + remaining.getQuantity() + " " + grainType.getDisplayName() + " dropped.");
+                    }
+                }
+            }
+        });
+        
+        // Set up generic resource harvest callback
+        this.resourceInteraction.setHarvestCallback((node, yield, itemId) -> {
+            System.out.println("Gathered " + yield + " " + node.getDisplayName() + "!");
+            // Add resource to player inventory
+            if (player != null) {
+                ItemStack stack = ItemRegistry.createStack(itemId, yield);
+                if (stack != null) {
+                    ItemStack remaining = player.getInventory().addItem(stack);
+                    if (remaining != null && !remaining.isEmpty()) {
+                        System.out.println("Inventory full! " + remaining.getQuantity() + " items dropped.");
                     }
                 }
             }
@@ -156,14 +199,87 @@ public class MapCanvas {
     public void setOnTownInteraction(Consumer<Town> handler) {
         this.onTownInteraction = handler;
     }
+
+    /**
+     * Sets the callback for interacting with NPCs.
+     */
+    public void setOnNPCInteraction(Consumer<NPC> handler) {
+        this.onNPCInteraction = handler;
+    }
     
     /**
      * Updates player and flag animations. Call this from a game loop.
+     * Also advances game time constantly.
      */
     public void update(double deltaTime) {
+        // Sync game speed from settings to GameTime
+        if (gameTime != null) {
+            double settingsSpeed = GameSettings.getInstance().getGameSpeed();
+            if (Math.abs(gameTime.getTimeMultiplier() - settingsSpeed) > 0.01) {
+                gameTime.setTimeMultiplier(settingsSpeed);
+            }
+        }
+        
+        // Update game time (constant flow)
+        if (gameTime != null && gameTime.isConstantFlow()) {
+            gameTime.update(deltaTime * 1000); // Convert to milliseconds
+        }
+        
+        // Don't update movement or animations when paused
+        if (gameTime != null && gameTime.isPaused()) {
+            return;
+        }
+        
+        // Update terrain renderer animations (water waves, etc.)
+        if (terrainRenderer != null) {
+            terrainRenderer.update(deltaTime);
+        }
+        
+        // Update action progress
+        if (actionProgress != null) {
+            actionProgress.update(deltaTime);
+        }
+        
         if (player != null) {
+            // Update player's current terrain for swimming detection
+            if (world != null && world.getTerrain() != null) {
+                int px = (int) player.getGridX();
+                int py = (int) player.getGridY();
+                TerrainType[][] terrainMap = world.getTerrain().getTerrainMap();
+                if (px >= 0 && px < terrainMap.length && py >= 0 && py < terrainMap[0].length) {
+                    player.setCurrentTerrain(terrainMap[px][py]);
+                }
+            }
+            
             boolean wasMoving = player.isMoving();
+            double oldX = player.getGridX();
+            double oldY = player.getGridY();
             player.update(deltaTime);
+            
+            // Calculate distance moved this frame and apply energy cost
+            if (wasMoving && playerEnergy != null) {
+                double newX = player.getGridX();
+                double newY = player.getGridY();
+                double tilesMoved = Math.sqrt((newX - oldX) * (newX - oldX) + (newY - oldY) * (newY - oldY));
+                
+                if (tilesMoved > 0.001) {
+                    if (player.isSwimming()) {
+                        // Deep water swimming - 3 energy per tile
+                        playerEnergy.consumeSwimmingEnergy(tilesMoved);
+                    } else if (player.isInShallowWater()) {
+                        // Wading in shallow water - free
+                        playerEnergy.consumeWadingEnergy(tilesMoved);
+                    } else {
+                        // Normal walking
+                        playerEnergy.consumeWalkingEnergy(tilesMoved);
+                    }
+                }
+            }
+            
+            // Camera follow: smoothly follow player when enabled and player is moving
+            if (cameraFollowPlayer && player.isMoving()) {
+                smoothFollowPlayer(deltaTime);
+            }
             
             // Check if player just stopped moving and has a pending town interaction
             if (wasMoving && !player.isMoving() && pendingTownInteraction != null) {
@@ -178,22 +294,47 @@ public class MapCanvas {
                     }
                 }
             }
+
+            // Check if player just stopped moving and has a pending NPC interaction
+            if (wasMoving && !player.isMoving() && pendingNPCInteraction != null) {
+                if (isPlayerNearNPC(pendingNPCInteraction)) {
+                    NPC npc = pendingNPCInteraction;
+                    pendingNPCInteraction = null;
+                    triggerNPCInteraction(npc);
+                }
+            }
             
             // Check if player just stopped moving and has a pending farmland interaction
             if (wasMoving && !player.isMoving() && pendingFarmlandInteraction != null) {
-                // Check if player is near the farmland
                 if (isPlayerNearFarmland(pendingFarmlandInteraction)) {
                     FarmlandNode farmland = pendingFarmlandInteraction;
                     pendingFarmlandInteraction = null;
                     
-                    // Show the farmland interaction menu
                     double[] screen = gridToScreen((int) farmland.getWorldX(), (int) farmland.getWorldY());
                     farmlandInteraction.show(farmland, screen[0], screen[1]);
+                }
+            }
+            
+            // Check if player just stopped moving and has a pending resource interaction
+            if (wasMoving && !player.isMoving() && pendingResourceInteraction != null) {
+                // Check if player is near the resource node
+                if (isPlayerNearResource(pendingResourceInteraction)) {
+                    ResourceNodeBase node = pendingResourceInteraction;
+                    pendingResourceInteraction = null;
+                    
+                    // Show generic resource interaction
+                    double[] screen = gridToScreen((int) node.getWorldX(), (int) node.getWorldY());
+                    resourceInteraction.show(node, screen[0], screen[1]);
                 }
             }
         }
         if (movementFlag != null) {
             movementFlag.update(deltaTime);
+        }
+
+        if (npcManager != null && player != null) {
+            double viewRadius = Math.max(canvas.getWidth(), canvas.getHeight()) / (GRID_SIZE * zoom) + 10;
+            npcManager.update(deltaTime, player.getGridX(), player.getGridY(), viewRadius, world.getTowns());
         }
     }
     
@@ -215,6 +356,31 @@ public class MapCanvas {
     }
     
     /**
+     * Checks if the player is near a resource node.
+     */
+    private boolean isPlayerNearResource(ResourceNodeBase node) {
+        if (player == null || node == null) return false;
+        
+        double playerX = player.getGridX();
+        double playerY = player.getGridY();
+        
+        return node.isInRange(playerX, playerY);
+    }
+
+    private boolean isPlayerNearNPC(NPC npc) {
+        if (player == null || npc == null) return false;
+        double dx = player.getGridX() - npc.getWorldX();
+        double dy = player.getGridY() - npc.getWorldY();
+        return Math.sqrt(dx * dx + dy * dy) <= 1.2;
+    }
+
+    private void triggerNPCInteraction(NPC npc) {
+        if (onNPCInteraction != null && npc != null) {
+            onNPCInteraction.accept(npc);
+        }
+    }
+    
+    /**
      * Checks if the player is near a farmland node.
      */
     private boolean isPlayerNearFarmland(FarmlandNode farmland) {
@@ -225,12 +391,11 @@ public class MapCanvas {
         double farmX = farmland.getWorldX();
         double farmY = farmland.getWorldY();
         
-        // Check if player is within interaction range (3 tiles - close proximity required)
         double dx = playerX - farmX;
         double dy = playerY - farmY;
         double distance = Math.sqrt(dx * dx + dy * dy);
         
-        return distance <= 3;
+        return distance <= 4; // Close proximity required
     }
     
     // ==================== Event Handling ====================
@@ -244,9 +409,27 @@ public class MapCanvas {
         
         canvas.setFocusTraversable(true);
         canvas.setOnKeyPressed(e -> {
+            // Check if action progress should handle the key
+            if (actionProgress != null && actionProgress.handleKeyPress(e.getCode())) {
+                render();
+                return;
+            }
+            
             if (e.getCode() == KeyCode.CONTROL) {
                 ctrlHeld = true;
                 render();
+            } else if (e.getCode() == KeyCode.SPACE) {
+                // Toggle pause (only if no action in progress)
+                if (gameTime != null && (actionProgress == null || !actionProgress.isInProgress())) {
+                    gameTime.togglePause();
+                    render();
+                }
+            } else if (e.getCode() == KeyCode.F) {
+                // Toggle fast forward (2x speed, only if no action in progress)
+                if (gameTime != null && (actionProgress == null || !actionProgress.isInProgress())) {
+                    gameTime.toggleSpeed();
+                    render();
+                }
             }
         });
         canvas.setOnKeyReleased(e -> {
@@ -283,9 +466,38 @@ public class MapCanvas {
         isDragging = false;
         
         if (wasClick) {
-            // Check if farmland interaction menu should handle the click
+            // Check for time control button clicks first
+            int timeBtn = getTimeButtonAt(e.getX(), e.getY());
+            if (timeBtn == 1 && gameTime != null) {
+                // Pause button clicked
+                if (actionProgress == null || !actionProgress.isInProgress()) {
+                    gameTime.togglePause();
+                    render();
+                    return;
+                }
+            } else if (timeBtn == 2 && gameTime != null) {
+                // Speed button clicked
+                if (actionProgress == null || !actionProgress.isInProgress()) {
+                    gameTime.toggleSpeed();
+                    render();
+                    return;
+                }
+            } else if (timeBtn == 3) {
+                // Center to player button clicked
+                centerOnPlayer();
+                render();
+                return;
+            }
+            
+            // Check if interaction menus should handle the click
             if (farmlandInteraction != null && farmlandInteraction.isVisible()) {
                 if (farmlandInteraction.onClick(e.getX(), e.getY())) {
+                    render();
+                    return;
+                }
+            }
+            if (resourceInteraction != null && resourceInteraction.isVisible()) {
+                if (resourceInteraction.onMouseClick(e.getX(), e.getY())) {
                     render();
                     return;
                 }
@@ -294,8 +506,12 @@ public class MapCanvas {
             int[] gridPos = screenToGrid(e.getX(), e.getY());
             
             if (e.getButton() == MouseButton.PRIMARY) {
-                // Left click: Move player to this location
-                handleLeftClick(gridPos[0], gridPos[1]);
+                // Left click: Move player or teleport (dev toggle)
+                if (GameSettings.getInstance().isTeleportCheatEnabled() && (e.isControlDown() || ctrlHeld)) {
+                    teleportPlayerTo(gridPos[0], gridPos[1]);
+                } else {
+                    handleLeftClick(gridPos[0], gridPos[1]);
+                }
             } else if (e.getButton() == MouseButton.SECONDARY) {
                 // Right click: Interact with structure
                 handleRightClick(gridPos[0], gridPos[1]);
@@ -309,19 +525,26 @@ public class MapCanvas {
      * Handles left-click: Move player to clicked location.
      */
     private void handleLeftClick(int gridX, int gridY) {
-        // Check if the terrain is walkable
+        // Don't allow movement when game is paused
+        if (gameTime != null && gameTime.isPaused()) {
+            return;
+        }
+        
+        // Check if the terrain is walkable (land or water - player can swim!)
         TerrainType[][] terrainMap = world.getTerrain().getTerrainMap();
         if (gridX >= 0 && gridX < world.getMapWidth() && gridY >= 0 && gridY < world.getMapHeight()) {
             TerrainType terrain = terrainMap[gridX][gridY];
-            if (terrain != null && !terrain.isWater()) {
-                // Set movement flag at clicked location
+            if (terrain != null) {
+                // Set movement flag at clicked location (works on land and water)
                 if (movementFlag != null) {
                     movementFlag.setPosition(gridX, gridY);
                 }
                 
-                // Move player toward the location
+                // Move player toward the location - can walk on land or swim in water
                 if (player != null) {
                     player.moveTo(gridX, gridY);
+                    // Enable camera follow when player clicks to move
+                    cameraFollowPlayer = true;
                 }
             }
         }
@@ -330,11 +553,49 @@ public class MapCanvas {
         MapStructure structure = world.getStructureAt(gridX, gridY);
         selectedStructure = structure;
     }
+
+    /**
+     * Teleports the player instantly to a grid location when the cheat toggle is enabled.
+     */
+    private void teleportPlayerTo(int gridX, int gridY) {
+        if (player == null) return;
+        player.teleportTo(gridX, gridY);
+        if (movementFlag != null) {
+            movementFlag.setPosition(gridX, gridY);
+        }
+        cameraFollowPlayer = true;
+        pendingTownInteraction = null;
+        pendingNPCInteraction = null;
+        pendingFarmlandInteraction = null;
+        pendingResourceInteraction = null;
+    }
     
     /**
      * Handles right-click: Interact with structures or farmland.
      */
     private void handleRightClick(int gridX, int gridY) {
+        // Don't allow interactions when game is paused
+        if (gameTime != null && gameTime.isPaused()) {
+            return;
+        }
+        
+        // Check for NPC interaction first (use grid coords for click detection)
+        NPC clickedNPC = npcManager != null ? npcManager.getNPCAt(gridX + 0.5, gridY + 0.5, 1.5) : null;
+        if (clickedNPC != null) {
+            if (isPlayerNearNPC(clickedNPC)) {
+                triggerNPCInteraction(clickedNPC);
+            } else if (GameSettings.getInstance().isMoveToInteract() && player != null) {
+                int targetX = (int) Math.round(clickedNPC.getWorldX());
+                int targetY = (int) Math.round(clickedNPC.getWorldY());
+                player.moveTo(targetX, targetY);
+                if (movementFlag != null) {
+                    movementFlag.setPosition(targetX, targetY);
+                }
+                pendingNPCInteraction = clickedNPC;
+            }
+            return;
+        }
+
         // Check for town/structure FIRST (higher priority than farmland)
         MapStructure structure = world.getStructureAt(gridX, gridY);
         
@@ -362,26 +623,45 @@ public class MapCanvas {
             return;
         }
         
-        // Then check for farmland at this location
+        // Check for farmland first (has its own specialized handling)
         FarmlandNode farmland = getFarmlandAt(gridX, gridY);
         if (farmland != null) {
-            // Check if player is near the farmland before allowing interaction
             if (isPlayerNearFarmland(farmland)) {
                 double[] screen = gridToScreen(gridX, gridY);
                 farmlandInteraction.show(farmland, screen[0], screen[1]);
             } else if (GameSettings.getInstance().isMoveToInteract() && player != null) {
-                // Move player towards farmland if setting is enabled
                 int targetX = (int) farmland.getWorldX();
                 int targetY = (int) farmland.getWorldY();
                 player.moveTo(targetX, targetY);
+                if (movementFlag != null) {
+                    movementFlag.setPosition(targetX, targetY);
+                }
+                pendingFarmlandInteraction = farmland;
+                pendingResourceInteraction = null;
+            }
+            return;
+        }
+        
+        // Then check for other resource nodes
+        ResourceNodeBase resourceNode = getResourceNodeAt(gridX, gridY);
+        if (resourceNode != null) {
+            // Check if player is near the resource before allowing interaction
+            if (isPlayerNearResource(resourceNode)) {
+                double[] screen = gridToScreen(gridX, gridY);
+                resourceInteraction.show(resourceNode, screen[0], screen[1]);
+            } else if (GameSettings.getInstance().isMoveToInteract() && player != null) {
+                // Move player towards resource if setting is enabled
+                int targetX = (int) resourceNode.getWorldX();
+                int targetY = (int) resourceNode.getWorldY();
+                player.moveTo(targetX, targetY);
                 
-                // Set flag at farmland location
+                // Set flag at resource location
                 if (movementFlag != null) {
                     movementFlag.setPosition(targetX, targetY);
                 }
                 
-                // Set pending farmland interaction
-                pendingFarmlandInteraction = farmland;
+                // Set pending resource interaction
+                pendingResourceInteraction = resourceNode;
             }
             return;
         }
@@ -390,17 +670,56 @@ public class MapCanvas {
     }
     
     /**
+     * Gets any resource node at a grid position.
+     * Uses expanded hit detection for better click targeting.
+     */
+    private ResourceNodeBase getResourceNodeAt(int gridX, int gridY) {
+        // Check all resource node types
+        List<ResourceNodeBase> allNodes = world.getAllResourceNodes();
+        if (allNodes == null) return null;
+        
+        ResourceNodeBase closest = null;
+        double closestDist = Double.MAX_VALUE;
+        
+        for (ResourceNodeBase node : allNodes) {
+            int nodeX = (int) node.getWorldX();
+            int nodeY = (int) node.getWorldY();
+            int nodeSize = (int) Math.max(3, node.getSize()); // Minimum size of 3 for hit detection
+            
+            // Check if click is within the node's expanded grid bounds
+            if (gridX >= nodeX - 1 && gridX < nodeX + nodeSize + 1 &&
+                gridY >= nodeY - 1 && gridY < nodeY + nodeSize + 1) {
+                // Calculate distance to node center
+                double dx = gridX - (nodeX + nodeSize / 2.0);
+                double dy = gridY - (nodeY + nodeSize / 2.0);
+                double dist = dx * dx + dy * dy;
+                
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closest = node;
+                }
+            }
+        }
+        return closest;
+    }
+    
+    /**
      * Gets farmland at a grid position.
+     * Uses tight hit detection - must click within the farmland's actual bounds.
      */
     private FarmlandNode getFarmlandAt(int gridX, int gridY) {
         List<FarmlandNode> farmlands = world.getFarmlandNodes();
         if (farmlands == null) return null;
         
         for (FarmlandNode farmland : farmlands) {
-            // Check if the click is within the farmland bounds
-            double dx = Math.abs(farmland.getWorldX() - gridX);
-            double dy = Math.abs(farmland.getWorldY() - gridY);
-            if (dx < 8 && dy < 6) { // Approximate farmland size
+            int farmX = (int) farmland.getWorldX();
+            int farmY = (int) farmland.getWorldY();
+            int farmWidth = farmland.getWidth();
+            int farmHeight = farmland.getHeight();
+            
+            // Check if click is within the farmland's actual grid bounds
+            if (gridX >= farmX && gridX < farmX + farmWidth &&
+                gridY >= farmY && gridY < farmY + farmHeight) {
                 return farmland;
             }
         }
@@ -416,6 +735,8 @@ public class MapCanvas {
         // Only start dragging if moved past threshold
         if (dragDist >= CLICK_THRESHOLD) {
             isDragging = true;
+            // Disable camera follow when user drags the map
+            cameraFollowPlayer = false;
         }
         
         if (isDragging) {
@@ -430,10 +751,19 @@ public class MapCanvas {
     }
     
     private void handleMouseMove(MouseEvent e) {
-        // Update farmland interaction menu hover state
+        // Update interaction menu hover states
         if (farmlandInteraction != null && farmlandInteraction.isVisible()) {
             farmlandInteraction.onMouseMove(e.getX(), e.getY());
         }
+        if (resourceInteraction != null && resourceInteraction.isVisible()) {
+            resourceInteraction.onMouseMove(e.getX(), e.getY());
+        }
+        
+        // Update time control button hover states
+        int timeBtn = getTimeButtonAt(e.getX(), e.getY());
+        pauseButtonHovered = (timeBtn == 1);
+        speedButtonHovered = (timeBtn == 2);
+        centerButtonHovered = (timeBtn == 3);
         
         int[] gridPos = screenToGrid(e.getX(), e.getY());
         hoveredStructure = world.getStructureAt(gridPos[0], gridPos[1]);
@@ -478,10 +808,12 @@ public class MapCanvas {
         // Render layers
         renderTerrain(width, height);
         renderDecorations(width, height);
-        renderResourceNodes(width, height);
-        renderFarmlandNodes(width, height);
+        renderAllResourceNodes(width, height);  // All resource nodes in one pass
         renderRoads(width, height);
         renderStructures(width, height);
+        if (npcManager != null) {
+            npcManager.render(gc, offsetX, offsetY, zoom, width, height, GRID_SIZE);
+        }
         
         // Render movement flag (below player)
         renderMovementFlag();
@@ -508,6 +840,14 @@ public class MapCanvas {
         // Render interaction menus (on top of everything)
         if (farmlandInteraction != null && farmlandInteraction.isVisible()) {
             farmlandInteraction.render(gc);
+        }
+        if (resourceInteraction != null && resourceInteraction.isVisible()) {
+            resourceInteraction.render(gc);
+        }
+        
+        // Render action progress overlay (top priority)
+        if (actionProgress != null && actionProgress.isInProgress()) {
+            actionProgress.render(gc, width, height);
         }
     }
     
@@ -536,12 +876,39 @@ public class MapCanvas {
         if (pos[0] + tileSize >= 0 && pos[0] <= canvas.getWidth() &&
             pos[1] + tileSize >= 0 && pos[1] <= canvas.getHeight()) {
             
-            // Scale sprite size based on zoom, but keep minimum size
-            double spriteSize = Math.max(30, tileSize * 1.2);
+            // Scale sprite size based on zoom, but keep minimum size for visibility
+            double minSpriteSize = 40; // Minimum size for zoomed out visibility
+            double spriteSize = Math.max(minSpriteSize, tileSize * 1.2);
             
             // Center sprite on tile
             double spriteX = pos[0] + (tileSize - spriteSize) / 2;
             double spriteY = pos[1] + (tileSize - spriteSize);
+            
+            // At low zoom, add a highlight ring around player for visibility
+            if (zoom < 0.3) {
+                double ringSize = Math.max(25, spriteSize * 1.3);
+                double ringX = pos[0] + tileSize / 2 - ringSize / 2;
+                double ringY = pos[1] + tileSize / 2 - ringSize / 2;
+                
+                // Pulsing glow effect
+                double pulse = 0.6 + Math.sin(System.currentTimeMillis() * 0.003) * 0.2;
+                gc.setFill(Color.web("#ffdd00").deriveColor(0, 1, 1, pulse * 0.5));
+                gc.fillOval(ringX - 3, ringY - 3, ringSize + 6, ringSize + 6);
+                
+                // Inner ring
+                gc.setStroke(Color.web("#ffdd00"));
+                gc.setLineWidth(3);
+                gc.strokeOval(ringX, ringY, ringSize, ringSize);
+                
+                // Player marker dot when very zoomed out
+                if (zoom < 0.1) {
+                    gc.setFill(Color.web("#ff4400"));
+                    gc.fillOval(pos[0] + tileSize / 2 - 8, pos[1] + tileSize / 2 - 8, 16, 16);
+                    gc.setFill(Color.web("#ffdd00"));
+                    gc.fillOval(pos[0] + tileSize / 2 - 5, pos[1] + tileSize / 2 - 5, 10, 10);
+                    return; // Don't render full sprite at extreme zoom out
+                }
+            }
             
             player.render(gc, spriteX, spriteY, spriteSize);
         }
@@ -626,22 +993,28 @@ public class MapCanvas {
     }
     
     private void renderTerrainTile(int x, int y, TerrainType terrain) {
-        // Determine tile color
-        Color terrainColor;
-        if (currentFilter instanceof ResourceHeatmapFilter) {
-            terrainColor = ((ResourceHeatmapFilter) currentFilter).getCellColor(x, y);
-        } else if (terrain.isWater()) {
-            terrainColor = getWaterColor(x, y);
-        } else {
-            terrainColor = currentFilter.getTerrainColor(terrain);
-        }
-        
         double[] pos = gridToScreen(x, y);
         double cellSize = GRID_SIZE * zoom;
         
-        // Draw terrain
-        gc.setFill(terrainColor);
-        gc.fillRect(pos[0], pos[1], cellSize, cellSize);
+        // Use professional terrain renderer at reasonable zoom levels
+        if (zoom >= 0.5 && terrainRenderer != null && !(currentFilter instanceof ResourceHeatmapFilter)) {
+            TerrainType[][] terrainMap = world.getTerrain().getTerrainMap();
+            TerrainType[][] neighbors = TerrainRenderer.getNeighbors(terrainMap, x, y);
+            terrainRenderer.renderTile(gc, x, y, pos[0], pos[1], cellSize, terrain, neighbors);
+        } else {
+            // Fallback to simple rendering at low zoom or with special filters
+            Color terrainColor;
+            if (currentFilter instanceof ResourceHeatmapFilter) {
+                terrainColor = ((ResourceHeatmapFilter) currentFilter).getCellColor(x, y);
+            } else if (terrain.isWater()) {
+                terrainColor = getWaterColor(x, y);
+            } else {
+                terrainColor = currentFilter.getTerrainColor(terrain);
+            }
+            
+            gc.setFill(terrainColor);
+            gc.fillRect(pos[0], pos[1], cellSize, cellSize);
+        }
         
         // Draw snow overlay
         if (world.getTerrain().isSnow(x, y) && terrain.isMountainous()) {
@@ -649,8 +1022,8 @@ public class MapCanvas {
             gc.fillRect(pos[0], pos[1], cellSize, cellSize);
         }
         
-        // Draw grid lines with fade effect at low zoom
-        if (zoom > GRID_FADE_START) {
+        // Draw grid lines with fade effect at low zoom (if enabled in settings)
+        if (GameSettings.getInstance().isShowGrid() && zoom > GRID_FADE_START) {
             double gridOpacity = Math.min(1.0, (zoom - GRID_FADE_START) / (GRID_FADE_END - GRID_FADE_START));
             Color gridColor = Color.color(
                 Math.min(1, GRID_LINE_COLOR.getRed() * gridBrightness),
@@ -720,42 +1093,50 @@ public class MapCanvas {
     }
     
     /**
-     * Renders resource nodes (grain fields, etc.).
+     * Renders all resource nodes (farmland, lumber, quarry, fishery, ore).
      */
-    private void renderResourceNodes(double width, double height) {
+    private void renderAllResourceNodes(double width, double height) {
         // Only render at reasonable zoom levels
-        if (zoom < 0.2) return;
+        if (zoom < 0.3) return;
         
-        List<ResourceNode> nodes = world.getTerrain().getResourceNodes();
-        if (nodes == null || nodes.isEmpty()) return;
-        
-        double viewX = -offsetX / (GRID_SIZE * zoom);
-        double viewY = -offsetY / (GRID_SIZE * zoom);
-        
-        for (ResourceNode node : nodes) {
-            node.render(gc, viewX, viewY, zoom, GRID_SIZE);
-        }
-    }
-    
-    /**
-     * Renders farmland nodes around villages.
-     */
-    private void renderFarmlandNodes(double width, double height) {
-        // Only render at reasonable zoom levels
-        if (zoom < 0.4) return;
-        
-        List<FarmlandNode> farmlands = world.getFarmlandNodes();
-        if (farmlands == null || farmlands.isEmpty()) return;
-        
-        for (FarmlandNode farmland : farmlands) {
-            double[] screen = gridToScreen((int)farmland.getWorldX(), (int)farmland.getWorldY());
+        // Render old-style resource nodes (terrain-based)
+        List<ResourceNode> terrainNodes = world.getTerrain().getResourceNodes();
+        if (terrainNodes != null && !terrainNodes.isEmpty()) {
+            double viewX = -offsetX / (GRID_SIZE * zoom);
+            double viewY = -offsetY / (GRID_SIZE * zoom);
             
-            // Check if on screen (with buffer)
-            if (screen[0] > -100 && screen[0] < width + 100 &&
-                screen[1] > -100 && screen[1] < height + 100) {
+            for (ResourceNode node : terrainNodes) {
+                node.render(gc, viewX, viewY, zoom, GRID_SIZE);
+            }
+        }
+        
+        // Render farmland nodes (separate handling as they don't extend ResourceNodeBase)
+        List<FarmlandNode> farmlands = world.getFarmlandNodes();
+        if (farmlands != null && !farmlands.isEmpty()) {
+            for (FarmlandNode farmland : farmlands) {
+                double[] screen = gridToScreen((int)farmland.getWorldX(), (int)farmland.getWorldY());
                 
-                double scale = zoom * GRID_SIZE / 10.0;
-                farmland.render(gc, screen[0], screen[1], scale);
+                if (screen[0] > -100 && screen[0] < width + 100 &&
+                    screen[1] > -100 && screen[1] < height + 100) {
+                    
+                    double scale = zoom * GRID_SIZE / 10.0;
+                    farmland.render(gc, screen[0], screen[1], scale);
+                }
+            }
+        }
+        
+        // Render all other village-based resource nodes
+        List<ResourceNodeBase> allNodes = world.getAllResourceNodes();
+        if (allNodes != null && !allNodes.isEmpty()) {
+            for (ResourceNodeBase node : allNodes) {
+                double[] screen = gridToScreen((int)node.getWorldX(), (int)node.getWorldY());
+                
+                // Check if on screen (with buffer)
+                if (screen[0] > -100 && screen[0] < width + 100 &&
+                    screen[1] > -100 && screen[1] < height + 100) {
+                    
+                    node.render(gc, screen[0], screen[1], zoom, GRID_SIZE);
+                }
             }
         }
     }
@@ -1110,16 +1491,16 @@ public class MapCanvas {
     }
     
     /**
-     * Renders the time display with sun position indicator.
+     * Renders the time display with date, sun position indicator, and time controls.
      */
     private void renderTimeDisplay(double width) {
         if (gameTime == null) return;
         
-        // Position in top-right corner
-        double displayX = width - 180;
+        // Position in top-right corner - larger for date display
+        double displayX = width - 220;
         double displayY = 10;
-        double displayWidth = 170;
-        double displayHeight = 50;
+        double displayWidth = 210;
+        double displayHeight = 80;
         
         // Background
         gc.setFill(Color.web("#1a1208").deriveColor(0, 1, 1, 0.85));
@@ -1130,21 +1511,34 @@ public class MapCanvas {
         gc.setLineWidth(1);
         gc.strokeRoundRect(displayX, displayY, displayWidth, displayHeight, 8, 8);
         
+        // Date text (e.g., "January 1st, 500 AD")
+        gc.setFill(Color.web("#c4a574"));
+        gc.setFont(Font.font("Georgia", javafx.scene.text.FontWeight.BOLD, 11));
+        gc.fillText(gameTime.getFormattedDate(), displayX + 10, displayY + 16);
+        
         // Time text
         gc.setFill(Color.web("#e8e0d0"));
         gc.setFont(Font.font("Georgia", javafx.scene.text.FontWeight.BOLD, 14));
-        gc.fillText(gameTime.getFormattedTime(), displayX + 10, displayY + 20);
+        gc.fillText(gameTime.getFormattedTime(), displayX + 10, displayY + 35);
         
         // Time of day
         gc.setFont(Font.font("Georgia", 11));
         gc.setFill(gameTime.getSkyTint());
-        gc.fillText(gameTime.getTimeOfDay().getDisplayName(), displayX + 85, displayY + 20);
+        gc.fillText(gameTime.getTimeOfDay().getDisplayName(), displayX + 95, displayY + 35);
+        
+        // Speed indicator
+        String speedText = gameTime.getSpeedDescription();
+        Color speedColor = gameTime.isPaused() ? Color.web("#ff6666") : 
+                          (gameTime.isFastSpeed() ? Color.web("#66ff66") : Color.web("#aaaaaa"));
+        gc.setFill(speedColor);
+        gc.setFont(Font.font("Georgia", 10));
+        gc.fillText(speedText, displayX + 160, displayY + 35);
         
         // Sun position indicator (horizontal bar)
         double barX = displayX + 10;
-        double barY = displayY + 30;
+        double barY = displayY + 45;
         double barWidth = displayWidth - 20;
-        double barHeight = 12;
+        double barHeight = 10;
         
         // Bar background (sky gradient)
         gc.setFill(Color.web("#0a1535")); // Night sky
@@ -1163,15 +1557,127 @@ public class MapCanvas {
             : Color.web("#ffdd00"); // Sun color
         
         gc.setFill(sunColor);
-        gc.fillOval(sunX - 5, barY + barHeight/2 - 5, 10, 10);
+        gc.fillOval(sunX - 4, barY + barHeight/2 - 4, 8, 8);
         
         // Border for bar
         gc.setStroke(Color.web("#c4a574").darker());
         gc.setLineWidth(1);
         gc.strokeRect(barX, barY, barWidth, barHeight);
         
+        // Time controls hint
+        gc.setFill(Color.web("#888888"));
+        gc.setFont(Font.font("Georgia", 9));
+        gc.fillText("[Space]=Pause  [F]=Fast", displayX + 10, displayY + 72);
+        
+        // Draw time control buttons
+        renderTimeControlButtons(displayX + displayWidth - 75, displayY + 58);
+        
         // Render energy meter right below
         renderEnergyMeter(displayX, displayY + displayHeight + 5, displayWidth);
+    }
+    
+    // Time control button state
+    private boolean pauseButtonHovered = false;
+    private boolean speedButtonHovered = false;
+    private boolean centerButtonHovered = false;
+    private double timeButtonX, timeButtonY;
+    private static final double TIME_BUTTON_SIZE = 22;
+    
+    /**
+     * Renders clickable time control buttons and center to player button.
+     */
+    private void renderTimeControlButtons(double x, double y) {
+        timeButtonX = x;
+        timeButtonY = y;
+        
+        // Pause/Play button
+        double btn1X = x;
+        Color btn1Bg = pauseButtonHovered ? Color.web("#4a3a25") : Color.web("#2a1f10");
+        Color btn1Border = gameTime.isPaused() ? Color.web("#ff6666") : Color.web("#c4a574");
+        
+        gc.setFill(btn1Bg);
+        gc.fillRoundRect(btn1X, y, TIME_BUTTON_SIZE, TIME_BUTTON_SIZE, 4, 4);
+        gc.setStroke(btn1Border);
+        gc.setLineWidth(1.5);
+        gc.strokeRoundRect(btn1X, y, TIME_BUTTON_SIZE, TIME_BUTTON_SIZE, 4, 4);
+        
+        // Draw pause/play icon
+        gc.setFill(btn1Border);
+        if (gameTime.isPaused()) {
+            // Play triangle
+            double[] xPoints = {btn1X + 7, btn1X + 7, btn1X + 17};
+            double[] yPoints = {y + 5, y + 17, y + 11};
+            gc.fillPolygon(xPoints, yPoints, 3);
+        } else {
+            // Pause bars
+            gc.fillRect(btn1X + 6, y + 5, 3, 12);
+            gc.fillRect(btn1X + 13, y + 5, 3, 12);
+        }
+        
+        // Speed button
+        double btn2X = x + TIME_BUTTON_SIZE + 5;
+        Color btn2Bg = speedButtonHovered ? Color.web("#4a3a25") : Color.web("#2a1f10");
+        Color btn2Border = gameTime.isFastSpeed() ? Color.web("#66ff66") : Color.web("#c4a574");
+        
+        gc.setFill(btn2Bg);
+        gc.fillRoundRect(btn2X, y, TIME_BUTTON_SIZE, TIME_BUTTON_SIZE, 4, 4);
+        gc.setStroke(btn2Border);
+        gc.setLineWidth(1.5);
+        gc.strokeRoundRect(btn2X, y, TIME_BUTTON_SIZE, TIME_BUTTON_SIZE, 4, 4);
+        
+        // Draw fast forward icon (>>)
+        gc.setFill(btn2Border);
+        gc.setFont(Font.font("Arial", javafx.scene.text.FontWeight.BOLD, 12));
+        gc.fillText(">>", btn2X + 3, y + 15);
+        
+        // Center to player button
+        double btn3X = x + (TIME_BUTTON_SIZE + 5) * 2;
+        Color btn3Bg = centerButtonHovered ? Color.web("#4a3a25") : Color.web("#2a1f10");
+        Color btn3Border = Color.web("#c4a574");
+        
+        gc.setFill(btn3Bg);
+        gc.fillRoundRect(btn3X, y, TIME_BUTTON_SIZE, TIME_BUTTON_SIZE, 4, 4);
+        gc.setStroke(btn3Border);
+        gc.setLineWidth(1.5);
+        gc.strokeRoundRect(btn3X, y, TIME_BUTTON_SIZE, TIME_BUTTON_SIZE, 4, 4);
+        
+        // Draw crosshair/target icon for center button
+        gc.setStroke(btn3Border);
+        gc.setLineWidth(1.5);
+        double cx = btn3X + TIME_BUTTON_SIZE / 2;
+        double cy = y + TIME_BUTTON_SIZE / 2;
+        gc.strokeLine(cx - 5, cy, cx + 5, cy);
+        gc.strokeLine(cx, cy - 5, cx, cy + 5);
+        gc.strokeOval(cx - 4, cy - 4, 8, 8);
+    }
+    
+    /**
+     * Checks if a point is over a time control button and returns which one (0=none, 1=pause, 2=speed, 3=center).
+     */
+    private int getTimeButtonAt(double mouseX, double mouseY) {
+        if (timeButtonX == 0 && timeButtonY == 0) return 0;
+        
+        // Pause button
+        if (mouseX >= timeButtonX && mouseX < timeButtonX + TIME_BUTTON_SIZE &&
+            mouseY >= timeButtonY && mouseY < timeButtonY + TIME_BUTTON_SIZE) {
+            return 1;
+        }
+        
+        // Speed button
+        double btn2X = timeButtonX + TIME_BUTTON_SIZE + 5;
+        if (mouseX >= btn2X && mouseX < btn2X + TIME_BUTTON_SIZE &&
+            mouseY >= timeButtonY && mouseY < timeButtonY + TIME_BUTTON_SIZE) {
+            return 2;
+        }
+        
+        // Center button
+        double btn3X = timeButtonX + (TIME_BUTTON_SIZE + 5) * 2;
+        if (mouseX >= btn3X && mouseX < btn3X + TIME_BUTTON_SIZE &&
+            mouseY >= timeButtonY && mouseY < timeButtonY + TIME_BUTTON_SIZE) {
+            return 3;
+        }
+        
+        return 0;
     }
     
     /**
@@ -1197,7 +1703,6 @@ public class MapCanvas {
         gc.fillText("Energy", displayX + 10, displayY + 15);
         
         // Percentage text
-        int percent = (int)(playerEnergy.getEnergyPercent() * 100);
         String energyText = (int)playerEnergy.getCurrentEnergy() + "/" + (int)playerEnergy.getMaxEnergy();
         gc.setFill(getEnergyColor());
         gc.fillText(energyText, displayX + 70, displayY + 15);
@@ -1309,6 +1814,66 @@ public class MapCanvas {
         offsetY = 0;
         zoom = 1.0;
         render();
+    }
+    
+    /**
+     * Centers the view on the player sprite.
+     */
+    public void centerOnPlayer() {
+        if (player == null) return;
+        
+        double playerGridX = player.getGridX();
+        double playerGridY = player.getGridY();
+        
+        // Calculate offset to center player on screen
+        offsetX = canvas.getWidth() / 2 - playerGridX * GRID_SIZE * zoom;
+        offsetY = canvas.getHeight() / 2 - playerGridY * GRID_SIZE * zoom;
+        
+        render();
+    }
+    
+    /**
+     * Smoothly follows the player when camera follow mode is enabled.
+     * Uses linear interpolation for smooth camera movement.
+     */
+    private void smoothFollowPlayer(double deltaTime) {
+        if (player == null) return;
+        
+        double playerGridX = player.getGridX();
+        double playerGridY = player.getGridY();
+        
+        // Target offset to center player on screen
+        double targetOffsetX = canvas.getWidth() / 2 - playerGridX * GRID_SIZE * zoom;
+        double targetOffsetY = canvas.getHeight() / 2 - playerGridY * GRID_SIZE * zoom;
+        
+        // Smoothly interpolate current offset toward target
+        double lerpFactor = Math.min(1.0, deltaTime * CAMERA_FOLLOW_SMOOTHNESS);
+        offsetX += (targetOffsetX - offsetX) * lerpFactor;
+        offsetY += (targetOffsetY - offsetY) * lerpFactor;
+    }
+    
+    /**
+     * Returns whether camera is currently following the player.
+     */
+    public boolean isCameraFollowPlayer() {
+        return cameraFollowPlayer;
+    }
+    
+    /**
+     * Sets whether camera should follow the player.
+     */
+    public void setCameraFollowPlayer(boolean follow) {
+        this.cameraFollowPlayer = follow;
+    }
+
+    /**
+     * Instant energy refill for dev tools.
+     */
+    public void refillEnergyCheat() {
+        if (playerEnergy != null) {
+            playerEnergy.fullyRestore();
+            render();
+        }
     }
     
     private void adjustZoom(double factor) {

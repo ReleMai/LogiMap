@@ -5,6 +5,9 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.ToggleButton;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
@@ -12,7 +15,7 @@ import javafx.scene.text.FontWeight;
 
 /**
  * Complete player status panel showing stats, health, energy, and currency.
- * Proper vertical layout with clear sections.
+ * Now with tabs for Overview and Attributes.
  */
 public class CharacterSheet extends VBox {
     
@@ -26,6 +29,8 @@ public class CharacterSheet extends VBox {
     private static final String BORDER = "#5a4a30";
     private static final String HP_COLOR = "#c04040";
     private static final String ENERGY_COLOR = "#40a040";
+    private static final String TAB_ACTIVE = "#3a2a15";
+    private static final String TAB_INACTIVE = "#1a1208";
     
     private static final int PANEL_WIDTH = 220;
     
@@ -45,6 +50,18 @@ public class CharacterSheet extends VBox {
     private Label silverLabel;
     private Label copperLabel;
     private Canvas spriteCanvas;
+    private Label levelLabel;
+    
+    // Tab content containers
+    private VBox overviewContent;
+    private VBox attributesContent;
+    private StackPane contentContainer;
+    
+    // Attribute labels for updating
+    private Label[] statLabels;
+    private Label[] statModLabels;
+    private Label xpLabel;
+    private Label statPointsLabel;
     
     public CharacterSheet(PlayerSprite player) {
         this(player, null);
@@ -67,12 +84,88 @@ public class CharacterSheet extends VBox {
         setSpacing(0);
         setPadding(new Insets(0));
         
-        getChildren().addAll(
-            createTitleBar(),
+        // Build the overview content
+        overviewContent = new VBox(0);
+        overviewContent.getChildren().addAll(
             createPlayerSection(),
             createStatsSection(),
             createCurrencySection()
         );
+        
+        // Build the attributes content
+        attributesContent = createAttributesSection();
+        
+        // Content container to switch between tabs
+        contentContainer = new StackPane();
+        contentContainer.getChildren().add(overviewContent);
+        
+        getChildren().addAll(
+            createTitleBar(),
+            createTabBar(),
+            contentContainer
+        );
+    }
+    
+    private HBox createTabBar() {
+        HBox tabBar = new HBox(0);
+        tabBar.setAlignment(Pos.CENTER);
+        tabBar.setStyle("-fx-background-color: " + BG_DARK + ";");
+        
+        ToggleGroup tabGroup = new ToggleGroup();
+        
+        ToggleButton overviewTab = createTabButton("Overview", tabGroup, true);
+        ToggleButton attributesTab = createTabButton("Attributes", tabGroup, false);
+        
+        overviewTab.setOnAction(e -> showTab(true));
+        attributesTab.setOnAction(e -> showTab(false));
+        
+        HBox.setHgrow(overviewTab, Priority.ALWAYS);
+        HBox.setHgrow(attributesTab, Priority.ALWAYS);
+        overviewTab.setMaxWidth(Double.MAX_VALUE);
+        attributesTab.setMaxWidth(Double.MAX_VALUE);
+        
+        tabBar.getChildren().addAll(overviewTab, attributesTab);
+        return tabBar;
+    }
+    
+    private ToggleButton createTabButton(String text, ToggleGroup group, boolean selected) {
+        ToggleButton btn = new ToggleButton(text);
+        btn.setToggleGroup(group);
+        btn.setSelected(selected);
+        btn.setFont(Font.font("Georgia", FontWeight.BOLD, 11));
+        btn.setPadding(new Insets(6, 12, 6, 12));
+        
+        String activeStyle = 
+            "-fx-background-color: " + TAB_ACTIVE + ";" +
+            "-fx-text-fill: " + GOLD + ";" +
+            "-fx-background-radius: 0;" +
+            "-fx-border-color: " + BORDER + ";" +
+            "-fx-border-width: 0 0 2 0;";
+        
+        String inactiveStyle = 
+            "-fx-background-color: " + TAB_INACTIVE + ";" +
+            "-fx-text-fill: " + TEXT_DIM + ";" +
+            "-fx-background-radius: 0;" +
+            "-fx-border-color: " + BORDER + ";" +
+            "-fx-border-width: 0 0 1 0;";
+        
+        btn.setStyle(selected ? activeStyle : inactiveStyle);
+        
+        btn.selectedProperty().addListener((obs, wasSelected, isSelected) -> {
+            btn.setStyle(isSelected ? activeStyle : inactiveStyle);
+        });
+        
+        return btn;
+    }
+    
+    private void showTab(boolean overview) {
+        contentContainer.getChildren().clear();
+        if (overview) {
+            contentContainer.getChildren().add(overviewContent);
+        } else {
+            contentContainer.getChildren().add(attributesContent);
+            refreshAttributes();
+        }
     }
     
     private HBox createTitleBar() {
@@ -116,8 +209,9 @@ public class CharacterSheet extends VBox {
         nameLabel.setTextFill(Color.web(GOLD));
         nameLabel.setFont(Font.font("Georgia", FontWeight.BOLD, 14));
         
-        // Level (placeholder)
-        Label levelLabel = new Label("Level 1 Adventurer");
+        // Level from CharacterStats
+        CharacterStats stats = player.getCharacterStats();
+        levelLabel = new Label("Level " + stats.getLevel() + " Adventurer");
         levelLabel.setTextFill(Color.web(TEXT_DIM));
         levelLabel.setFont(Font.font("Georgia", 11));
         
@@ -234,6 +328,164 @@ public class CharacterSheet extends VBox {
         
         section.getChildren().addAll(header, coins);
         return section;
+    }
+    
+    /**
+     * Creates the Attributes tab content showing the 7 primary stats.
+     */
+    private VBox createAttributesSection() {
+        VBox section = new VBox(8);
+        section.setPadding(new Insets(12));
+        section.setStyle("-fx-background-color: " + BG_DARK + "; -fx-background-radius: 0 0 6 6;");
+        
+        CharacterStats stats = player.getCharacterStats();
+        CharacterStats.Stat[] statTypes = CharacterStats.Stat.values();
+        
+        // Initialize arrays for updating
+        statLabels = new Label[statTypes.length];
+        statModLabels = new Label[statTypes.length];
+        
+        // Header
+        Label header = new Label("⚔ Primary Attributes");
+        header.setTextFill(Color.web(GOLD));
+        header.setFont(Font.font("Georgia", FontWeight.BOLD, 12));
+        section.getChildren().add(header);
+        
+        // Stat grid
+        GridPane statGrid = new GridPane();
+        statGrid.setHgap(8);
+        statGrid.setVgap(4);
+        statGrid.setPadding(new Insets(5, 0, 10, 0));
+        
+        for (int i = 0; i < statTypes.length; i++) {
+            CharacterStats.Stat stat = statTypes[i];
+            
+            // Stat abbreviation
+            Label abbrevLabel = new Label(stat.name());
+            abbrevLabel.setTextFill(Color.web(GOLD));
+            abbrevLabel.setFont(Font.font("Georgia", FontWeight.BOLD, 11));
+            abbrevLabel.setPrefWidth(35);
+            
+            // Stat value
+            statLabels[i] = new Label(String.valueOf(stats.getStat(stat)));
+            statLabels[i].setTextFill(Color.web(TEXT));
+            statLabels[i].setFont(Font.font("Georgia", FontWeight.BOLD, 12));
+            statLabels[i].setPrefWidth(25);
+            statLabels[i].setAlignment(Pos.CENTER);
+            
+            // Modifier
+            statModLabels[i] = new Label(stats.getStatModifierDisplay(stat));
+            int mod = stats.getStatModifier(stat);
+            statModLabels[i].setTextFill(Color.web(mod >= 0 ? "#80c080" : "#c08080"));
+            statModLabels[i].setFont(Font.font("Georgia", 10));
+            statModLabels[i].setPrefWidth(25);
+            
+            // Full name tooltip-like label
+            Label nameLabel = new Label(stat.getFullName());
+            nameLabel.setTextFill(Color.web(TEXT_DIM));
+            nameLabel.setFont(Font.font("Georgia", 9));
+            
+            statGrid.add(abbrevLabel, 0, i);
+            statGrid.add(statLabels[i], 1, i);
+            statGrid.add(statModLabels[i], 2, i);
+            statGrid.add(nameLabel, 3, i);
+        }
+        section.getChildren().add(statGrid);
+        
+        // Derived stats section
+        Label derivedHeader = new Label("📊 Derived Stats");
+        derivedHeader.setTextFill(Color.web(GOLD));
+        derivedHeader.setFont(Font.font("Georgia", FontWeight.BOLD, 12));
+        section.getChildren().add(derivedHeader);
+        
+        VBox derivedStats = new VBox(3);
+        derivedStats.setPadding(new Insets(5, 0, 10, 0));
+        
+        derivedStats.getChildren().addAll(
+            createDerivedStatRow("Max Health", String.valueOf(stats.getMaxHealth()), HP_COLOR),
+            createDerivedStatRow("Max Stamina", String.valueOf(stats.getMaxStamina()), ENERGY_COLOR),
+            createDerivedStatRow("Melee Dmg", "+" + stats.getMeleeDamage(), "#c08080"),
+            createDerivedStatRow("Dodge", stats.getDodgeChance() + "%", "#80a0c0"),
+            createDerivedStatRow("Critical", stats.getCritChance() + "%", "#c0a080"),
+            createDerivedStatRow("Trade Bonus", (stats.getTradeModifier() >= 0 ? "+" : "") + stats.getTradeModifier() + "%", "#c4a574"),
+            createDerivedStatRow("Max Party", String.valueOf(stats.getMaxPartySize()), "#a0a0c0")
+        );
+        section.getChildren().add(derivedStats);
+        
+        // Experience section
+        Label xpHeader = new Label("⭐ Experience");
+        xpHeader.setTextFill(Color.web(GOLD));
+        xpHeader.setFont(Font.font("Georgia", FontWeight.BOLD, 12));
+        section.getChildren().add(xpHeader);
+        
+        VBox xpSection = new VBox(3);
+        xpSection.setPadding(new Insets(5, 0, 5, 0));
+        
+        xpLabel = new Label("XP: " + stats.getExperience() + " / " + stats.getExperienceToNextLevel());
+        xpLabel.setTextFill(Color.web(TEXT));
+        xpLabel.setFont(Font.font("Georgia", 11));
+        
+        statPointsLabel = new Label("Stat Points: " + stats.getStatPoints());
+        statPointsLabel.setTextFill(Color.web(stats.getStatPoints() > 0 ? "#ffd700" : TEXT_DIM));
+        statPointsLabel.setFont(Font.font("Georgia", 11));
+        
+        xpSection.getChildren().addAll(xpLabel, statPointsLabel);
+        section.getChildren().add(xpSection);
+        
+        // Wrap in ScrollPane for overflow
+        ScrollPane scrollPane = new ScrollPane(section);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
+        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scrollPane.setPrefViewportHeight(300);
+        
+        VBox wrapper = new VBox(scrollPane);
+        wrapper.setStyle("-fx-background-color: " + BG_DARK + "; -fx-background-radius: 0 0 6 6;");
+        
+        return wrapper;
+    }
+    
+    private HBox createDerivedStatRow(String name, String value, String color) {
+        HBox row = new HBox();
+        row.setAlignment(Pos.CENTER_LEFT);
+        
+        Label nameLabel = new Label(name + ":");
+        nameLabel.setTextFill(Color.web(TEXT_DIM));
+        nameLabel.setFont(Font.font("Georgia", 10));
+        nameLabel.setPrefWidth(80);
+        
+        Label valueLabel = new Label(value);
+        valueLabel.setTextFill(Color.web(color));
+        valueLabel.setFont(Font.font("Georgia", FontWeight.BOLD, 11));
+        
+        row.getChildren().addAll(nameLabel, valueLabel);
+        return row;
+    }
+    
+    /**
+     * Refreshes the attributes tab values.
+     */
+    private void refreshAttributes() {
+        if (statLabels == null) return;
+        
+        CharacterStats stats = player.getCharacterStats();
+        CharacterStats.Stat[] statTypes = CharacterStats.Stat.values();
+        
+        for (int i = 0; i < statTypes.length; i++) {
+            CharacterStats.Stat stat = statTypes[i];
+            statLabels[i].setText(String.valueOf(stats.getStat(stat)));
+            statModLabels[i].setText(stats.getStatModifierDisplay(stat));
+            int mod = stats.getStatModifier(stat);
+            statModLabels[i].setTextFill(Color.web(mod >= 0 ? "#80c080" : "#c08080"));
+        }
+        
+        xpLabel.setText("XP: " + stats.getExperience() + " / " + stats.getExperienceToNextLevel());
+        statPointsLabel.setText("Stat Points: " + stats.getStatPoints());
+        statPointsLabel.setTextFill(Color.web(stats.getStatPoints() > 0 ? "#ffd700" : TEXT_DIM));
+        
+        // Update level label
+        levelLabel.setText("Level " + stats.getLevel() + " Adventurer");
     }
     
     private void renderSprite() {

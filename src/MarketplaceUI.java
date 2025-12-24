@@ -49,6 +49,8 @@ public class MarketplaceUI extends StackPane {
         ALL("All", "🏷"),
         GRAIN("Grain", "🌾"),
         MATERIAL("Materials", "🪨"),
+        MEAT("Meat", "🍖"),
+        FISH("Fish", "🐟"),
         FOOD("Food", "🍞"),
         EQUIPMENT("Equipment", "⚔");
         
@@ -521,13 +523,20 @@ public class MarketplaceUI extends StackPane {
     private boolean matchesFilter(Item item) {
         if (currentFilter == ItemFilter.ALL) return true;
         
+        String id = item.getId();
         switch (currentFilter) {
             case GRAIN:
-                return item.getId().startsWith("grain_");
+                return id.startsWith("grain_");
             case MATERIAL:
-                return item.getCategory() == Item.Category.MATERIAL && !item.getId().startsWith("grain_");
+                return id.startsWith("timber_") || id.startsWith("stone_") || 
+                       id.startsWith("ore_") || id.startsWith("wood_");
+            case MEAT:
+                return id.startsWith("meat_");
+            case FISH:
+                return id.startsWith("fish_");
             case FOOD:
-                return item.getCategory() == Item.Category.CONSUMABLE;
+                return item.getCategory() == Item.Category.CONSUMABLE &&
+                       !id.startsWith("meat_") && !id.startsWith("fish_");
             case EQUIPMENT:
                 return item.getCategory() == Item.Category.EQUIPMENT || 
                        item.getCategory() == Item.Category.WEAPON;

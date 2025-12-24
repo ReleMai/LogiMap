@@ -664,7 +664,10 @@ public class WorldGenerator {
                     TerrainDecoration.Category cat = chooseDecorationCategory(t, decRand);
                     if (cat != null) {
                         int variant = decRand.nextInt(10);
-                        double size = 0.3 + decRand.nextDouble() * 0.5;
+                        // Increased base size, especially for trees
+                        double baseSize = cat == TerrainDecoration.Category.TREE ? 0.5 : 0.3;
+                        double sizeRange = cat == TerrainDecoration.Category.TREE ? 0.7 : 0.5;
+                        double size = baseSize + decRand.nextDouble() * sizeRange;
                         double rotation = decRand.nextDouble() * 20 - 10;
                         
                         // Add small random offset
@@ -685,28 +688,28 @@ public class WorldGenerator {
             case FOREST:
             case DENSE_FOREST:
             case JUNGLE:
-                return 0.5; // Dense decorations
+                return 0.65; // Increased - Dense decorations
             case TAIGA:
-                return 0.4;
+                return 0.55; // Increased
             case GRASS:
             case MEADOW:
             case PLAINS:
-                return 0.25;
+                return 0.35; // Increased
             case SAVANNA:
             case SCRUBLAND:
-                return 0.15;
+                return 0.22; // Increased
             case HILLS:
             case ROCKY_HILLS:
-                return 0.2;
+                return 0.30; // Increased - more rocks on hills
             case MOUNTAIN:
-                return 0.1;
+                return 0.18; // Increased
             case DESERT:
             case DUNES:
-                return 0.08;
+                return 0.15; // Increased - more rocks/cacti
             case BEACH:
-                return 0.05;
+                return 0.12; // Increased - shells, driftwood
             default:
-                return 0.1;
+                return 0.15;
         }
     }
     

@@ -25,10 +25,14 @@ public class FarmlandInteraction {
     private double menuWidth = 280;
     private double menuHeight = 200;
     
+    // Action duration in game minutes
+    private static final int HARVEST_DURATION = 5;
+    
     // Current target
     private FarmlandNode targetFarmland;
     private GameTime gameTime;
     private PlayerEnergy playerEnergy;
+    private ActionProgress actionProgress;  // For timed actions
     
     // Button states
     private boolean harvestHovered = false;
@@ -57,6 +61,13 @@ public class FarmlandInteraction {
      */
     public void setHarvestCallback(HarvestCallback callback) {
         this.harvestCallback = callback;
+    }
+    
+    /**
+     * Sets the action progress system for timed harvesting.
+     */
+    public void setActionProgress(ActionProgress actionProgress) {
+        this.actionProgress = actionProgress;
     }
     
     /**
@@ -171,25 +182,49 @@ public class FarmlandInteraction {
     }
     
     /**
-     * Performs the harvest action.
+     * Performs the harvest action using timed progress.
      */
     private void performHarvest() {
         if (targetFarmland == null) return;
         
-        // Perform harvest
-        int yield = targetFarmland.harvest(gameTime, playerEnergy);
-        
-        if (yield > 0) {
-            // Advance time for farming action (30 minutes)
-            gameTime.advanceTime(30);
-            
-            // Notify callback
-            if (harvestCallback != null) {
-                harvestCallback.onHarvest(targetFarmland, yield, targetFarmland.getGrainType());
-            }
+        // Consume energy upfront
+        if (!playerEnergy.consumeEnergy(PlayerEnergy.FARMING_COST)) {
+            return;
         }
         
+        // Save target info for callback
+        final FarmlandNode farmland = targetFarmland;
+        
+        // Hide menu while action is in progress
         hide();
+        
+        // Start timed action if action progress is available
+        if (actionProgress != null) {
+            actionProgress.startAction(
+                "Harvesting " + farmland.getGrainType().getDisplayName(),
+                HARVEST_DURATION,
+                () -> {
+                    // On complete: perform actual harvest
+                    int yield = farmland.harvestDirect();
+                    
+                    if (yield > 0 && harvestCallback != null) {
+                        harvestCallback.onHarvest(farmland, yield, farmland.getGrainType());
+                    }
+                },
+                () -> {
+                    // On cancel: refund half energy
+                    playerEnergy.addEnergy(PlayerEnergy.FARMING_COST / 2);
+                }
+            );
+        } else {
+            // Fallback to instant if no action progress (legacy)
+            gameTime.advanceTime(30);
+            int yield = farmland.harvestDirect();
+            
+            if (yield > 0 && harvestCallback != null) {
+                harvestCallback.onHarvest(farmland, yield, farmland.getGrainType());
+            }
+        }
     }
     
     /**

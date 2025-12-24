@@ -96,6 +96,14 @@ public enum TerrainType {
         return this == DEEP_OCEAN || this == OCEAN || this == SHALLOW_WATER || this == REEF;
     }
     
+    public boolean isDeepWater() {
+        return this == DEEP_OCEAN || this == OCEAN;
+    }
+    
+    public boolean isShallowWater() {
+        return this == SHALLOW_WATER || this == REEF;
+    }
+    
     public boolean isForest() {
         return this == FOREST || this == DENSE_FOREST || this == TAIGA || this == JUNGLE;
     }

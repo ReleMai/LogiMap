@@ -25,9 +25,13 @@ public class PlayerSprite {
     private double targetGridX;
     private double targetGridY;
     private boolean isMoving = false;
+    private boolean movementLocked = false;  // Lock movement during actions
     
     // Movement speed (grid cells per second)
     private static final double MOVE_SPEED = 8.0;
+    private static final double SHALLOW_WATER_SPEED_MULT = 0.7;  // 30% speed reduction in shallow water
+    private static final double DEEP_WATER_SPEED_MULT = 0.3;     // 70% speed reduction in deep water
+    private static final double SWIMMING_STAMINA_COST = 0.5;     // Stamina cost per second when swimming
     
     // Modular body parts
     private Map<BodyPart.Type, BodyPart> bodyParts;
@@ -51,9 +55,20 @@ public class PlayerSprite {
     // Player inventory
     private Inventory inventory;
     
+    // Player's party
+    private Party party;
+    
+    // Character stats (primary attributes and derived stats)
+    private CharacterStats characterStats;
+    
     // Animation state
     private double animationTime = 0;
     private boolean facingRight = true;
+    
+    // Swimming state
+    private boolean isSwimming = false;
+    private boolean isInShallowWater = false;
+    private TerrainType currentTerrain = null;
     
     // Visual customization
     private Color hairColor = Color.web("#4a3728");
@@ -85,6 +100,12 @@ public class PlayerSprite {
         
         // Initialize inventory (4 rows x 6 columns = 24 slots)
         this.inventory = new Inventory("Backpack", 4, 6);
+        
+        // Initialize party (starts empty)
+        this.party = new Party();
+        
+        // Initialize character stats with default values (average human stats)
+        this.characterStats = new CharacterStats();
         
         // Give player starting items (ragged clothes to equip)
         this.inventory.addItem(ItemRegistry.createStack("ragged_shirt", 1));
@@ -189,6 +210,7 @@ public class PlayerSprite {
     
     /**
      * Updates player position and body parts.
+     * @param deltaTime Time since last update in seconds
      */
     public void update(double deltaTime) {
         // Update body parts
@@ -216,6 +238,13 @@ public class PlayerSprite {
                 moveAmount *= 0.5; // 50% speed when leg is crippled
             }
             
+            // Apply water movement penalties
+            if (isSwimming) {
+                moveAmount *= DEEP_WATER_SPEED_MULT;
+            } else if (isInShallowWater) {
+                moveAmount *= SHALLOW_WATER_SPEED_MULT;
+            }
+            
             if (moveAmount >= distance) {
                 gridX = targetGridX;
                 gridY = targetGridY;
@@ -235,9 +264,58 @@ public class PlayerSprite {
     }
     
     /**
+     * Updates the terrain type the player is currently on.
+     * This affects movement speed and animation.
+     */
+    public void setCurrentTerrain(TerrainType terrain) {
+        this.currentTerrain = terrain;
+        if (terrain != null && terrain.isWater()) {
+            if (terrain.isDeepWater()) {
+                isSwimming = true;
+                isInShallowWater = false;
+            } else {
+                isSwimming = false;
+                isInShallowWater = true;
+            }
+        } else {
+            isSwimming = false;
+            isInShallowWater = false;
+        }
+    }
+    
+    /**
+     * Gets the stamina cost per second for current movement.
+     * Walking on land costs no stamina, shallow water costs none,
+     * swimming in deep water costs stamina.
+     */
+    public double getMovementStaminaCost() {
+        if (isSwimming && isMoving) {
+            return SWIMMING_STAMINA_COST;
+        }
+        return 0.0;
+    }
+    
+    /**
+     * Returns true if player is currently swimming.
+     */
+    public boolean isSwimming() {
+        return isSwimming;
+    }
+    
+    /**
+     * Returns true if player is in shallow water.
+     */
+    public boolean isInShallowWater() {
+        return isInShallowWater;
+    }
+    
+    /**
      * Sets the movement target for the player.
+     * Movement is blocked if movementLocked is true.
      */
     public void moveTo(double targetX, double targetY) {
+        if (movementLocked) return;  // Don't allow movement during actions
+        
         this.targetGridX = targetX;
         this.targetGridY = targetY;
         this.isMoving = true;
@@ -246,6 +324,27 @@ public class PlayerSprite {
         if (Math.abs(dx) > 0.1) {
             facingRight = dx > 0;
         }
+    }
+    
+    /**
+     * Locks or unlocks player movement.
+     * Used during gathering and other actions.
+     */
+    public void setMovementLocked(boolean locked) {
+        this.movementLocked = locked;
+        if (locked) {
+            // Stop any current movement
+            this.targetGridX = this.gridX;
+            this.targetGridY = this.gridY;
+            this.isMoving = false;
+        }
+    }
+    
+    /**
+     * Checks if movement is currently locked.
+     */
+    public boolean isMovementLocked() {
+        return movementLocked;
     }
     
     /**
@@ -266,11 +365,24 @@ public class PlayerSprite {
         double centerX = screenX + size / 2;
         double bottomY = screenY + size * 0.95; // Slight offset from bottom
         
-        // Walking animation
+        // Swimming vs walking animation
         double bobOffset = 0;
         double legSwing = 0;
         double armSwing = 0;
-        if (isMoving) {
+        double swimOffset = 0;
+        
+        if (isSwimming && isMoving) {
+            // Swimming animation - horizontal stroke motion
+            bobOffset = Math.sin(animationTime * 6) * size * 0.02;
+            armSwing = Math.sin(animationTime * 6) * 30; // Wide arm strokes
+            swimOffset = -size * 0.3; // Sink lower in water
+        } else if (isInShallowWater && isMoving) {
+            // Wading animation - slower walk
+            bobOffset = Math.sin(animationTime * 6) * size * 0.01;
+            legSwing = Math.sin(animationTime * 5) * 6; // Smaller leg swing
+            armSwing = Math.sin(animationTime * 5 + Math.PI) * 4;
+        } else if (isMoving) {
+            // Normal walking animation
             bobOffset = Math.sin(animationTime * 10) * size * 0.015;
             legSwing = Math.sin(animationTime * 8) * 10;
             armSwing = Math.sin(animationTime * 8 + Math.PI) * 8;
@@ -279,8 +391,13 @@ public class PlayerSprite {
         double scaleX = facingRight ? 1 : -1;
         
         gc.save();
-        gc.translate(centerX, bottomY + bobOffset);
+        gc.translate(centerX, bottomY + bobOffset + swimOffset);
         gc.scale(scaleX, 1);
+        
+        // Rotate body slightly when swimming
+        if (isSwimming) {
+            gc.rotate(15); // Tilt forward
+        }
         
         // Unit-based proportions for a chibi-style character
         double unit = size / 12.0;
@@ -295,18 +412,19 @@ public class PlayerSprite {
         double armH = unit * 2.2;        // Arm height
         
         // Y positions (from feet up)
-        double legsBottom = 0;
         double legsTop = -legH;
         double bodyBottom = legsTop + unit * 0.3; // Overlap with legs
         double bodyTop = bodyBottom - bodyH;
         double headCenter = bodyTop - headR * 0.6; // Head overlaps body slightly
         
-        // Shadow
-        gc.setFill(Color.color(0, 0, 0, 0.25));
-        gc.fillOval(-unit * 1.5, -unit * 0.3, unit * 3, unit * 0.8);
+        // Shadow (don't show in water)
+        if (!isSwimming && !isInShallowWater) {
+            gc.setFill(Color.color(0, 0, 0, 0.25));
+            gc.fillOval(-unit * 1.5, -unit * 0.3, unit * 3, unit * 0.8);
+        }
         
         // === CAPE (back layer) ===
-        if (cape != null) {
+        if (cape != null && !isSwimming) {
             cape.renderCape(gc, -bodyW * 0.55, bodyTop, bodyW * 1.1, bodyH + legH * 0.5);
         }
         
@@ -317,22 +435,24 @@ public class PlayerSprite {
         renderArm(gc, bodyParts.get(BodyPart.Type.LEFT_ARM), armW, armH, false);
         gc.restore();
         
-        // === LEGS ===
-        double legGap = unit * 0.3;
-        
-        // Left leg
-        gc.save();
-        gc.translate(-legGap, legsTop);
-        if (isMoving) gc.rotate(legSwing);
-        renderLeg(gc, bodyParts.get(BodyPart.Type.LEFT_LEG), legW, legH);
-        gc.restore();
-        
-        // Right leg
-        gc.save();
-        gc.translate(legGap, legsTop);
-        if (isMoving) gc.rotate(-legSwing);
-        renderLeg(gc, bodyParts.get(BodyPart.Type.RIGHT_LEG), legW, legH);
-        gc.restore();
+        // === LEGS === (hidden when swimming)
+        if (!isSwimming) {
+            double legGap = unit * 0.3;
+            
+            // Left leg
+            gc.save();
+            gc.translate(-legGap, legsTop);
+            if (isMoving) gc.rotate(legSwing);
+            renderLeg(gc, bodyParts.get(BodyPart.Type.LEFT_LEG), legW, legH);
+            gc.restore();
+            
+            // Right leg
+            gc.save();
+            gc.translate(legGap, legsTop);
+            if (isMoving) gc.rotate(-legSwing);
+            renderLeg(gc, bodyParts.get(BodyPart.Type.RIGHT_LEG), legW, legH);
+            gc.restore();
+        }
         
         // === BODY ===
         renderTorso(gc, bodyParts.get(BodyPart.Type.CHEST), -bodyW / 2, bodyTop, bodyW, bodyH);
@@ -346,6 +466,13 @@ public class PlayerSprite {
         
         // === HEAD ===
         renderHead(gc, bodyParts.get(BodyPart.Type.HEAD), headCenter, headR);
+        
+        // Draw water ripples when in water
+        if (isSwimming || isInShallowWater) {
+            gc.setFill(Color.color(0.3, 0.5, 0.8, 0.3));
+            double rippleSize = unit * 4;
+            gc.fillOval(-rippleSize, -unit * 0.5, rippleSize * 2, unit);
+        }
         
         gc.restore();
         
@@ -631,6 +758,8 @@ public class PlayerSprite {
     public void addGold(int amount) { this.gold += amount; }
     public Currency getCurrency() { return currency; }
     public Inventory getInventory() { return inventory; }
+    public Party getParty() { return party; }
+    public CharacterStats getCharacterStats() { return characterStats; }
     public boolean isFacingRight() { return facingRight; }
     public void setFacingRight(boolean facingRight) { this.facingRight = facingRight; }
     public Map<BodyPart.Type, BodyPart> getAllBodyParts() { return bodyParts; }

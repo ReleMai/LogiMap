@@ -76,6 +76,20 @@ public class GearSheet extends VBox {
             createEquipmentSection(),
             createStatsSection()
         );
+        
+        // Add scene-level mouse release handler to clean up drag state
+        sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene != null) {
+                newScene.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_RELEASED, e -> {
+                    // Clean up drag state if still dragging
+                    if (DragOverlay.isDragging()) {
+                        InventoryUI.clearDragState();
+                        DragOverlay.endDrag();
+                        refresh();
+                    }
+                });
+            }
+        });
     }
     
     private HBox createTitleBar() {

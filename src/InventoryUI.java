@@ -5,11 +5,15 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.ToggleButton;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import java.util.List;
+import java.util.ArrayList;
 
 /**
  * Grid-based inventory panel with proper item slots and drag/drop.
@@ -31,6 +35,29 @@ public class InventoryUI extends VBox {
     private static final int SLOT_SIZE = 48;
     private static final int SLOT_GAP = 4;
     private static final int VISIBLE_ROWS = 4;
+    
+    // Sorting filter options
+    public enum SortMode {
+        ALL("All", "📦"),
+        EQUIPMENT("Equipment", "⚔"),
+        RESOURCES("Resources", "🪵"),
+        CONSUMABLES("Food", "🍖"),
+        VALUABLES("Valuables", "💎");
+        
+        private final String name;
+        private final String icon;
+        
+        SortMode(String name, String icon) {
+            this.name = name;
+            this.icon = icon;
+        }
+        
+        public String getName() { return name; }
+        public String getIcon() { return icon; }
+    }
+    
+    private SortMode currentSortMode = SortMode.ALL;
+    private List<Integer> filteredSlots; // Indices of slots to display based on filter
     
     private Inventory inventory;
     private Canvas[] slots;
@@ -76,6 +103,8 @@ public class InventoryUI extends VBox {
         
         getChildren().addAll(
             createTitleBar(),
+            createFilterBar(),
+            createDecorationLine(),
             createInventoryGrid(),
             createInfoPanel()
         );
@@ -84,6 +113,44 @@ public class InventoryUI extends VBox {
         inventory.setOnInventoryChanged(() -> {
             javafx.application.Platform.runLater(() -> refresh());
         });
+        
+        // Add scene-level mouse release handler to clean up drag state
+        // This catches cases where drag ends outside of any slot
+        sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene != null) {
+                newScene.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_RELEASED, e -> {
+                    // If we're still in drag state when mouse is released anywhere, clean up
+                    if (draggedItem != null || draggedStack != null || DragOverlay.isDragging()) {
+                        cleanupDragState();
+                    }
+                });
+            }
+        });
+    }
+    
+    /**
+     * Comprehensive cleanup of all drag-related state.
+     */
+    private void cleanupDragState() {
+        // Clear static state
+        int sourceSlot = draggedFromSlot;
+        draggedItem = null;
+        draggedFromSlot = -1;
+        draggedFromInventory = null;
+        
+        // Clear instance state
+        draggedStack = null;
+        
+        // End drag overlay
+        DragOverlay.endDrag();
+        
+        // Remove visual feedback from source slot
+        if (sourceSlot >= 0 && sourceSlot < slots.length && slots[sourceSlot] != null) {
+            slots[sourceSlot].setStyle("");
+        }
+        
+        // Refresh all slots to reset visual state
+        refresh();
     }
     
     /**
@@ -157,6 +224,201 @@ public class InventoryUI extends VBox {
         
         setupDragging(bar);
         return bar;
+    }
+    
+    /**
+     * Creates a decorative filter bar with category tabs.
+     */
+    private HBox createFilterBar() {
+        HBox bar = new HBox(2);
+        bar.setPadding(new Insets(6, 8, 6, 8));
+        bar.setAlignment(Pos.CENTER);
+        bar.setStyle("-fx-background-color: " + BG_DARK + ";");
+        
+        ToggleGroup filterGroup = new ToggleGroup();
+        
+        for (SortMode mode : SortMode.values()) {
+            ToggleButton btn = createFilterButton(mode, filterGroup);
+            bar.getChildren().add(btn);
+            
+            if (mode == SortMode.ALL) {
+                btn.setSelected(true);
+            }
+        }
+        
+        // Sort button on the right
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        
+        Button sortBtn = new Button("↕");
+        sortBtn.setStyle(
+            "-fx-background-color: " + BG_LIGHT + ";" +
+            "-fx-text-fill: " + TEXT_DIM + ";" +
+            "-fx-font-size: 12;" +
+            "-fx-padding: 4 8;" +
+            "-fx-background-radius: 3;" +
+            "-fx-cursor: hand;"
+        );
+        sortBtn.setTooltip(new Tooltip("Sort by value"));
+        sortBtn.setOnAction(e -> sortInventory());
+        sortBtn.setOnMouseEntered(ev -> sortBtn.setStyle(sortBtn.getStyle().replace(TEXT_DIM, GOLD)));
+        sortBtn.setOnMouseExited(ev -> sortBtn.setStyle(sortBtn.getStyle().replace(GOLD, TEXT_DIM)));
+        
+        bar.getChildren().addAll(spacer, sortBtn);
+        return bar;
+    }
+    
+    /**
+     * Creates a filter toggle button for a sort mode.
+     */
+    private ToggleButton createFilterButton(SortMode mode, ToggleGroup group) {
+        ToggleButton btn = new ToggleButton(mode.getIcon());
+        btn.setToggleGroup(group);
+        btn.setTooltip(new Tooltip(mode.getName()));
+        btn.setPrefWidth(36);
+        btn.setPrefHeight(26);
+        
+        String baseStyle = 
+            "-fx-background-color: " + BG_MED + ";" +
+            "-fx-text-fill: " + TEXT_DIM + ";" +
+            "-fx-font-size: 12;" +
+            "-fx-padding: 2 6;" +
+            "-fx-background-radius: 3;" +
+            "-fx-cursor: hand;";
+        
+        String selectedStyle = 
+            "-fx-background-color: " + BG_LIGHT + ";" +
+            "-fx-text-fill: " + GOLD + ";" +
+            "-fx-font-size: 12;" +
+            "-fx-padding: 2 6;" +
+            "-fx-background-radius: 3;" +
+            "-fx-border-color: " + BORDER + ";" +
+            "-fx-border-width: 0 0 2 0;" +
+            "-fx-cursor: hand;";
+        
+        btn.setStyle(baseStyle);
+        btn.selectedProperty().addListener((obs, wasSelected, isSelected) -> {
+            btn.setStyle(isSelected ? selectedStyle : baseStyle);
+            if (isSelected) {
+                currentSortMode = mode;
+                updateFilteredSlots();
+                refresh();
+            }
+        });
+        
+        return btn;
+    }
+    
+    /**
+     * Creates a decorative line separator with medieval flourish.
+     */
+    private HBox createDecorationLine() {
+        HBox line = new HBox();
+        line.setAlignment(Pos.CENTER);
+        line.setPadding(new Insets(0, 10, 0, 10));
+        
+        // Left decorative line
+        Region leftLine = new Region();
+        leftLine.setStyle("-fx-background-color: linear-gradient(to right, transparent, " + BORDER + ");");
+        leftLine.setPrefHeight(1);
+        HBox.setHgrow(leftLine, Priority.ALWAYS);
+        
+        // Center ornament
+        Label ornament = new Label("◆");
+        ornament.setTextFill(Color.web(BORDER));
+        ornament.setFont(Font.font("Georgia", 8));
+        ornament.setPadding(new Insets(0, 4, 0, 4));
+        
+        // Right decorative line
+        Region rightLine = new Region();
+        rightLine.setStyle("-fx-background-color: linear-gradient(to left, transparent, " + BORDER + ");");
+        rightLine.setPrefHeight(1);
+        HBox.setHgrow(rightLine, Priority.ALWAYS);
+        
+        line.getChildren().addAll(leftLine, ornament, rightLine);
+        return line;
+    }
+    
+    /**
+     * Updates the filtered slots list based on current sort mode.
+     */
+    private void updateFilteredSlots() {
+        filteredSlots = new ArrayList<>();
+        
+        for (int i = 0; i < inventory.getSize(); i++) {
+            ItemStack stack = inventory.getSlot(i);
+            if (stack == null || stack.isEmpty()) {
+                // Always show empty slots at the end
+                continue;
+            }
+            
+            Item item = stack.getItem();
+            boolean matches = switch (currentSortMode) {
+                case ALL -> true;
+                case EQUIPMENT -> item.isEquipment();
+                case RESOURCES -> isResource(item);
+                case CONSUMABLES -> isConsumable(item);
+                case VALUABLES -> isValuable(item);
+            };
+            
+            if (matches) {
+                filteredSlots.add(i);
+            }
+        }
+    }
+    
+    /**
+     * Checks if an item is a resource (wood, stone, ore, etc.).
+     */
+    private boolean isResource(Item item) {
+        String id = item.getId();
+        return id.contains("wood") || id.contains("stone") || id.contains("ore") || 
+               id.contains("log") || id.contains("iron") || id.contains("coal") ||
+               id.contains("plank") || id.contains("ingot") || id.contains("leather");
+    }
+    
+    /**
+     * Checks if an item is a consumable (food, potions, etc.).
+     */
+    private boolean isConsumable(Item item) {
+        String id = item.getId();
+        return id.contains("bread") || id.contains("meat") || id.contains("fish") ||
+               id.contains("apple") || id.contains("cheese") || id.contains("potion") ||
+               id.contains("food") || id.contains("herb") || id.contains("berry");
+    }
+    
+    /**
+     * Checks if an item is valuable (gems, gold items, rare drops).
+     */
+    private boolean isValuable(Item item) {
+        Item.Rarity rarity = item.getRarity();
+        return rarity == Item.Rarity.RARE || rarity == Item.Rarity.EPIC ||
+               rarity == Item.Rarity.LEGENDARY || item.getBaseValue() >= 50;
+    }
+    
+    /**
+     * Sorts the inventory by value (highest first).
+     */
+    private void sortInventory() {
+        // Collect all items
+        List<ItemStack> items = new ArrayList<>();
+        for (int i = 0; i < inventory.getSize(); i++) {
+            ItemStack stack = inventory.getSlot(i);
+            if (stack != null && !stack.isEmpty()) {
+                items.add(stack);
+                inventory.setSlot(i, null);
+            }
+        }
+        
+        // Sort by value descending
+        items.sort((a, b) -> Long.compare(b.getTotalValue(), a.getTotalValue()));
+        
+        // Put back in order
+        for (int i = 0; i < items.size(); i++) {
+            inventory.setSlot(i, items.get(i));
+        }
+        
+        refresh();
     }
     
     private int getItemCount() {
@@ -305,18 +567,9 @@ public class InventoryUI extends VBox {
                     refresh();
                 }
             }
-            // Save the source slot index before clearing state
-            int sourceSlot = draggedFromSlot;
             
-            // Clear all drag states
-            draggedStack = null;
-            clearDragState();
-            DragOverlay.endDrag();
-            
-            // Clear visual feedback from source slot (use saved index)
-            if (sourceSlot >= 0 && sourceSlot < slots.length) {
-                slots[sourceSlot].setStyle("");
-            }
+            // Use comprehensive cleanup
+            cleanupDragState();
         });
         
         return canvas;

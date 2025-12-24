@@ -17,6 +17,8 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
+// Game systems
+
 /**
  * Main UI class for LogiMap - Logistics & Supply Chain Simulator.
  * Provides the primary application window with map display and control panels.
@@ -46,6 +48,7 @@ public class LogiMapUI extends Application {
     // Player and gameplay
     private PlayerSprite player;
     private TownInteractionMenu townInteractionMenu;
+    private TavernRecruitmentPanel tavernRecruitmentPanel;
     private MarketplaceUI marketplaceUI;
     private EconomySystem economySystem;
     private LoreDialogue loreDialogue;
@@ -180,8 +183,11 @@ public class LogiMapUI extends Application {
             
             // Set up town interaction callback
             mapCanvas.setOnTownInteraction(this::handleTownInteraction);
+            mapCanvas.setOnNPCInteraction(this::handleNPCInteraction);
         } else {
             mapCanvas = new MapCanvas();
+            mapCanvas.setOnTownInteraction(this::handleTownInteraction);
+            mapCanvas.setOnNPCInteraction(this::handleNPCInteraction);
         }
         javafx.scene.canvas.Canvas canvas = mapCanvas.getCanvas();
         
@@ -290,8 +296,18 @@ public class LogiMapUI extends Application {
     /**
      * Handles right-click interaction with a town.
      * Shows lore dialogue first, then town menu if player chooses to enter.
+     * If instantTownMenu setting is enabled, skips the dialogue.
      */
     private void handleTownInteraction(Town town) {
+        // Check if instant town menu is enabled in settings
+        if (GameSettings.getInstance().isInstantTownMenu()) {
+            // Skip dialogue and go straight to town menu
+            if (townInteractionMenu != null) {
+                townInteractionMenu.showForTown(town, player);
+            }
+            return;
+        }
+        
         if (loreDialogue != null && player != null) {
             // Generate a lord name for castles (major towns)
             String lordName = generateLordName(town.getName());
@@ -327,6 +343,13 @@ public class LogiMapUI extends Application {
             }
         }
     }
+
+    private void handleNPCInteraction(NPC npc) {
+        if (npc == null || newsTicker == null) return;
+        String line = npc.getDialogue();
+        String message = npc.getName() + " (" + npc.getType().getName() + "): \"" + line + "\"";
+        newsTicker.addNewsItem(message);
+    }
     
     /**
      * Generates a lord name based on the town name.
@@ -347,28 +370,16 @@ public class LogiMapUI extends Application {
     }
     
     /**
-     * Initializes the bottom section with news ticker and controls.
+     * Initializes the bottom section with news ticker.
+     * The news ticker includes its own integrated log expansion button.
      */
     private void initializeBottomSection() {
-        HBox bottomSection = new HBox(10);
-        bottomSection.setPadding(new Insets(5, 10, 5, 10));
-        bottomSection.setAlignment(Pos.CENTER_LEFT);
-        bottomSection.setStyle(
-            "-fx-background-color: " + MEDIUM_BG + ";" +
-            "-fx-border-color: " + ACCENT_COLOR + ";" +
-            "-fx-border-width: 1 0 0 0;"
-        );
-        
-        // News ticker
+        // News ticker with integrated log button
         newsTicker = new NewsTicker();
         HBox.setHgrow(newsTicker.getContainer(), Priority.ALWAYS);
         
-        // Log viewer button
-        Button logButton = createStyledButton("LOG", LIGHT_BG, TEXT_COLOR);
-        logButton.setOnAction(e -> openLogViewer());
-        
-        bottomSection.getChildren().addAll(newsTicker.getContainer(), logButton);
-        mainLayout.setBottom(bottomSection);
+        // Set the news ticker as the bottom section directly
+        mainLayout.setBottom(newsTicker.getContainer());
     }
     
     /**
@@ -380,6 +391,7 @@ public class LogiMapUI extends Application {
         
         // Wire up control handlers
         wireControlHandlers();
+        wireDevTools();
         
         // Create the themed menu panel
         menuPanel = createThemedMenuPanel();
@@ -410,6 +422,22 @@ public class LogiMapUI extends Application {
             }
         });
         
+        // Create tavern recruitment panel
+        tavernRecruitmentPanel = new TavernRecruitmentPanel();
+        tavernRecruitmentPanel.setOnClose(() -> {
+            // Return to town interaction menu when closing recruitment
+            Town town = tavernRecruitmentPanel.getCurrentTown();
+            if (town != null && player != null) {
+                townInteractionMenu.showForTown(town, player);
+            }
+        });
+        tavernRecruitmentPanel.setOnHire((npc, success) -> {
+            // Handle hire result
+            if (success) {
+                System.out.println("Hired: " + npc.getName());
+            }
+        });
+        
         // Create town interaction menu
         townInteractionMenu = new TownInteractionMenu();
         townInteractionMenu.setOnTrade(() -> {
@@ -424,12 +452,23 @@ public class LogiMapUI extends Application {
             handleResting();
         });
         townInteractionMenu.setOnRecruit(() -> {
-            System.out.println("Opening recruitment...");
-            // TODO: Implement recruitment
+            // Open tavern recruitment panel
+            Town town = townInteractionMenu.getCurrentTown();
+            if (town != null && player != null) {
+                townInteractionMenu.close();
+                tavernRecruitmentPanel.showForTown(town, player);
+            }
         });
         townInteractionMenu.setOnViewInfo(() -> {
             System.out.println("Viewing town info...");
             // TODO: Implement town info view
+        });
+        townInteractionMenu.setOnWarehouse(() -> {
+            Town town = townInteractionMenu.getCurrentTown();
+            if (town != null) {
+                townInteractionMenu.close();
+                showWarehouseUI(town);
+            }
         });
         
         // Create lore dialogue for story interactions
@@ -447,8 +486,8 @@ public class LogiMapUI extends Application {
         initializeFloatingPanels();
         
         // Add to the center stack (overlays the map)
-        // Order matters: menu panel, town interaction, marketplace, lore dialogue, then floating panels on top
-        centerStack.getChildren().addAll(menuPanel, townInteractionMenu, marketplaceUI, loreDialogue, floatingPanelLayer);
+        // Order matters: menu panel, town interaction, marketplace, recruitment, lore dialogue, then floating panels on top
+        centerStack.getChildren().addAll(menuPanel, townInteractionMenu, marketplaceUI, tavernRecruitmentPanel, loreDialogue, floatingPanelLayer);
     }
     
     /**
@@ -604,10 +643,34 @@ public class LogiMapUI extends Application {
             () -> openJournal()
         );
         
+        // Party handler
+        interactionMenu.setPartyHandler(() -> openPartyUI());
+        
         // Update wallet display
         if (player != null) {
             interactionMenu.updateWallet(player.getCurrency());
         }
+    }
+
+    /**
+     * Wires developer tool shortcuts for quick testing/cheats.
+     */
+    private void wireDevTools() {
+        interactionMenu.setDevToolHandlers(
+            () -> {
+                if (player != null) {
+                    player.getCurrency().addGold(500);
+                    interactionMenu.updateWallet(player.getCurrency());
+                }
+            },
+            () -> {
+                if (mapCanvas != null) {
+                    mapCanvas.refillEnergyCheat();
+                }
+            },
+            enabled -> GameSettings.getInstance().setTeleportCheatEnabled(enabled)
+        );
+        interactionMenu.syncTeleportCheat(GameSettings.getInstance().isTeleportCheatEnabled());
     }
     
     /**
@@ -647,6 +710,8 @@ public class LogiMapUI extends Application {
             
             // Reinitialize map with new world
             mapCanvas = new MapCanvas(world);
+            mapCanvas.setOnTownInteraction(this::handleTownInteraction);
+            mapCanvas.setOnNPCInteraction(this::handleNPCInteraction);
             javafx.scene.canvas.Canvas canvas = mapCanvas.getCanvas();
             
             StackPane mapContainer = new StackPane(canvas);
@@ -691,40 +756,6 @@ public class LogiMapUI extends Application {
         if (parent != null) {
             parent.getChildren().add(loadMenu);
         }
-    }
-    
-    /**
-     * Opens the notification log viewer window.
-     */
-    private void openLogViewer() {
-        Stage logStage = new Stage();
-        logStage.setTitle("Notification Log");
-        
-        VBox layout = new VBox(10);
-        layout.setPadding(new Insets(15));
-        layout.setStyle("-fx-background-color: " + DARK_BG + ";");
-        
-        Label title = new Label("Notification History");
-        title.setStyle(
-            "-fx-text-fill: " + TEXT_COLOR + ";" +
-            "-fx-font-size: 16px;" +
-            "-fx-font-weight: bold;"
-        );
-        
-        TextArea logArea = new TextArea(newsTicker.getLogHistory());
-        logArea.setEditable(false);
-        logArea.setStyle(
-            "-fx-control-inner-background: " + MEDIUM_BG + ";" +
-            "-fx-text-fill: " + TEXT_COLOR + ";"
-        );
-        VBox.setVgrow(logArea, Priority.ALWAYS);
-        
-        Button closeButton = createStyledButton("Close", ACCENT_COLOR, "white");
-        closeButton.setOnAction(e -> logStage.close());
-        
-        layout.getChildren().addAll(title, logArea, closeButton);
-        logStage.setScene(new Scene(layout, 500, 400));
-        logStage.show();
     }
     
     /**
@@ -805,6 +836,34 @@ public class LogiMapUI extends Application {
         inventoryFloatingPanel.setLayoutX(620);
         inventoryFloatingPanel.setLayoutY(100);
         floatingPanelLayer.getChildren().add(inventoryFloatingPanel);
+    }
+    
+    // Party UI and panel
+    private PartyUI partyUI;
+    private FloatingPanel partyFloatingPanel;
+    
+    /**
+     * Opens the party management UI as a floating panel.
+     */
+    private void openPartyUI() {
+        if (player == null) return;
+        
+        // Initialize party UI if needed
+        if (partyUI == null) {
+            partyUI = new PartyUI(player.getParty(), player);
+            
+            // Create floating panel - PartyUI extends VBox so we can add it directly
+            partyFloatingPanel = new FloatingPanel("⚔ Party Management", partyUI);
+            partyFloatingPanel.setLayoutX(100);
+            partyFloatingPanel.setLayoutY(100);
+            floatingPanelLayer.getChildren().add(partyFloatingPanel);
+        }
+        
+        if (partyFloatingPanel.isShowing()) {
+            partyFloatingPanel.hide();
+        } else {
+            partyFloatingPanel.show();
+        }
     }
 
     /**
@@ -1065,6 +1124,46 @@ public class LogiMapUI extends Application {
         
         // Close town menu
         townInteractionMenu.close();
+    }
+    
+    /**
+     * Shows the warehouse UI for a specific town.
+     */
+    private void showWarehouseUI(Town town) {
+        if (town == null) return;
+        
+        TownWarehouse warehouse = town.getWarehouse();
+        WarehouseUI warehouseUI = new WarehouseUI(warehouse, player);
+        
+        warehouseUI.setOnClose(() -> {
+            floatingPanelLayer.getChildren().remove(warehouseUI);
+        });
+        
+        warehouseUI.setOnInventoryChanged(() -> {
+            // Refresh inventory UI if visible
+            if (inventoryUI != null) {
+                inventoryUI.refresh();
+            }
+            // Update wallet display
+            interactionMenu.updateWallet(player.getCurrency());
+        });
+        
+        // Position in center
+        warehouseUI.setLayoutX((floatingPanelLayer.getWidth() - 350) / 2);
+        warehouseUI.setLayoutY((floatingPanelLayer.getHeight() - 400) / 2);
+        
+        // Make draggable
+        final double[] dragOffset = new double[2];
+        warehouseUI.setOnMousePressed(e -> {
+            dragOffset[0] = e.getSceneX() - warehouseUI.getLayoutX();
+            dragOffset[1] = e.getSceneY() - warehouseUI.getLayoutY();
+        });
+        warehouseUI.setOnMouseDragged(e -> {
+            warehouseUI.setLayoutX(e.getSceneX() - dragOffset[0]);
+            warehouseUI.setLayoutY(e.getSceneY() - dragOffset[1]);
+        });
+        
+        floatingPanelLayer.getChildren().add(warehouseUI);
     }
     
     /**

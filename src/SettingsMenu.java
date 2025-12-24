@@ -36,6 +36,9 @@ public class SettingsMenu extends StackPane {
     private Slider scrollSpeedSlider;
     private Slider zoomSpeedSlider;
     private CheckBox moveToInteractCheck;
+    private CheckBox basicGraphicsCheck;
+    private CheckBox showGridCheck;
+    private CheckBox instantTownMenuCheck;
     
     public SettingsMenu() {
         this(null);
@@ -70,6 +73,9 @@ public class SettingsMenu extends StackPane {
         scrollSpeedSlider.setValue(settings.getScrollSpeed() * 100);
         zoomSpeedSlider.setValue(settings.getZoomSpeed() * 100);
         moveToInteractCheck.setSelected(settings.isMoveToInteract());
+        basicGraphicsCheck.setSelected(settings.isBasicGraphicsMode());
+        showGridCheck.setSelected(settings.isShowGrid());
+        instantTownMenuCheck.setSelected(settings.isInstantTownMenu());
     }
     
     private void createContent() {
@@ -100,7 +106,8 @@ public class SettingsMenu extends StackPane {
             createDisplaySection(),
             createAudioSection(),
             createGameplaySection(),
-            createControlsSection()
+            createControlsSection(),
+            createGraphicsInterfaceSection()
         );
         
         ScrollPane scrollPane = new ScrollPane(sectionsBox);
@@ -269,6 +276,37 @@ public class SettingsMenu extends StackPane {
         return section;
     }
     
+    private VBox createGraphicsInterfaceSection() {
+        VBox section = createSection("🎨 Graphics & Interface");
+        
+        // Basic Graphics Mode
+        basicGraphicsCheck = createCheckBox("Basic Graphics Mode", false);
+        Label basicGraphicsHint = new Label("Simple textures, no decorations, no animations");
+        basicGraphicsHint.setFont(Font.font("Arial", 10));
+        basicGraphicsHint.setTextFill(Color.web(TEXT_COLOR, 0.6));
+        VBox basicGraphicsRow = new VBox(2);
+        basicGraphicsRow.getChildren().addAll(basicGraphicsCheck, basicGraphicsHint);
+        
+        // Show Grid
+        showGridCheck = createCheckBox("Show Map Grid", true);
+        Label showGridHint = new Label("Display grid lines on the map");
+        showGridHint.setFont(Font.font("Arial", 10));
+        showGridHint.setTextFill(Color.web(TEXT_COLOR, 0.6));
+        VBox showGridRow = new VBox(2);
+        showGridRow.getChildren().addAll(showGridCheck, showGridHint);
+        
+        // Instant Town Menu
+        instantTownMenuCheck = createCheckBox("Instant Town Menu", false);
+        Label instantTownHint = new Label("Skip guard conversation when entering towns");
+        instantTownHint.setFont(Font.font("Arial", 10));
+        instantTownHint.setTextFill(Color.web(TEXT_COLOR, 0.6));
+        VBox instantTownRow = new VBox(2);
+        instantTownRow.getChildren().addAll(instantTownMenuCheck, instantTownHint);
+        
+        section.getChildren().addAll(basicGraphicsRow, showGridRow, instantTownRow);
+        return section;
+    }
+    
     private VBox createSection(String title) {
         VBox section = new VBox(10);
         section.setPadding(new Insets(12));
@@ -396,6 +434,11 @@ public class SettingsMenu extends StackPane {
         settings.setScrollSpeed(scrollSpeedSlider.getValue() / 100.0);
         settings.setZoomSpeed(zoomSpeedSlider.getValue() / 100.0);
         settings.setMoveToInteract(moveToInteractCheck.isSelected());
+        
+        // Apply new graphics/interface settings
+        settings.setBasicGraphicsMode(basicGraphicsCheck.isSelected());
+        settings.setShowGrid(showGridCheck.isSelected());
+        settings.setInstantTownMenu(instantTownMenuCheck.isSelected());
         
         // Save to file
         settings.save();

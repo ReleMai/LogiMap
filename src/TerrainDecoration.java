@@ -84,10 +84,15 @@ public class TerrainDecoration {
         double screenY = (worldY - viewY) * zoom * tileSize;
         double renderSize = size * zoom * tileSize * 0.8;
         
+        // Skip if off screen
         if (screenX < -50 || screenX > gc.getCanvas().getWidth() + 50 ||
             screenY < -50 || screenY > gc.getCanvas().getHeight() + 50) {
             return;
         }
+        
+        // Round to nearest pixel to prevent sub-pixel jitter
+        screenX = Math.round(screenX);
+        screenY = Math.round(screenY);
         
         gc.save();
         gc.translate(screenX, screenY);

@@ -41,6 +41,7 @@ public class TownInteractionMenu extends StackPane {
     private Runnable onRest;
     private Runnable onRecruit;
     private Runnable onViewInfo;
+    private Runnable onWarehouse;
     
     // Style constants - Medieval parchment theme
     private static final String MENU_BG = "#2d2418";
@@ -206,7 +207,13 @@ public class TownInteractionMenu extends StackPane {
             if (onViewInfo != null) onViewInfo.run();
         });
         
-        options.getChildren().addAll(title, tradeBtn, restBtn, recruitBtn, infoBtn);
+        // Warehouse button
+        Button warehouseBtn = createStyledButton("📦 Warehouse", true);
+        warehouseBtn.setOnAction(e -> {
+            if (onWarehouse != null) onWarehouse.run();
+        });
+        
+        options.getChildren().addAll(title, tradeBtn, restBtn, recruitBtn, infoBtn, warehouseBtn);
         
         return options;
     }
@@ -322,6 +329,7 @@ public class TownInteractionMenu extends StackPane {
     public void setOnRest(Runnable handler) { this.onRest = handler; }
     public void setOnRecruit(Runnable handler) { this.onRecruit = handler; }
     public void setOnViewInfo(Runnable handler) { this.onViewInfo = handler; }
+    public void setOnWarehouse(Runnable handler) { this.onWarehouse = handler; }
     
     // === Getters ===
     

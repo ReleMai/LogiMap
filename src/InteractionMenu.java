@@ -44,6 +44,12 @@ public class InteractionMenu {
     private Runnable onSaveWorld;
     private Runnable onLoadWorld;
     private Runnable onMainMenu;
+
+    // Dev tool handlers
+    private Runnable onDevGiveGold;
+    private Runnable onDevRefillEnergy;
+    private java.util.function.Consumer<Boolean> onTeleportToggle;
+    private CheckBox teleportCheatCheck;
     
     // Character handlers
     private Runnable onOpenCharacterSheet;
@@ -52,6 +58,7 @@ public class InteractionMenu {
     private Runnable onOpenRelationships;
     private Runnable onOpenSkills;
     private Runnable onOpenJournal;
+    private Runnable onOpenParty;
     
     // Style constants - Medieval theme
     private static final String DARK_BG = "#1f1a10";
@@ -293,13 +300,15 @@ public class InteractionMenu {
         // Social
         panel.getChildren().add(createSectionLabel("👥 SOCIAL"));
         
+        Button partyBtn = createButton("⚔ Party");
         Button relationshipsBtn = createButton("🤝 Relationships");
         Button reputationBtn = createButton("⭐ Reputation");
         
+        partyBtn.setOnAction(e -> { if (onOpenParty != null) onOpenParty.run(); });
         relationshipsBtn.setOnAction(e -> { if (onOpenRelationships != null) onOpenRelationships.run(); });
         reputationBtn.setOnAction(e -> { if (onOpenRelationships != null) onOpenRelationships.run(); });
         
-        panel.getChildren().addAll(relationshipsBtn, reputationBtn);
+        panel.getChildren().addAll(partyBtn, relationshipsBtn, reputationBtn);
         
         // Progression
         panel.getChildren().add(createSectionLabel("📈 PROGRESSION"));
@@ -384,6 +393,26 @@ public class InteractionMenu {
         autosaveCheck.setOnAction(e -> autosaveSlider.setDisable(!autosaveCheck.isSelected()));
         
         panel.getChildren().addAll(autosaveCheck, autosaveLabel, autosaveSlider);
+
+        // Dev tools / cheats
+        panel.getChildren().add(createSectionLabel("DEV TOOLS"));
+
+        Button devGoldBtn = createButton("💰 Add 500g");
+        devGoldBtn.setOnAction(e -> { if (onDevGiveGold != null) onDevGiveGold.run(); });
+        
+        Button devEnergyBtn = createButton("⚡ Refill Energy");
+        devEnergyBtn.setOnAction(e -> { if (onDevRefillEnergy != null) onDevRefillEnergy.run(); });
+        
+        teleportCheatCheck = new CheckBox("Ctrl+Click Teleport");
+        teleportCheatCheck.setSelected(GameSettings.getInstance().isTeleportCheatEnabled());
+        teleportCheatCheck.setStyle("-fx-text-fill: " + TEXT_COLOR + ";");
+        teleportCheatCheck.setOnAction(e -> {
+            if (onTeleportToggle != null) {
+                onTeleportToggle.accept(teleportCheatCheck.isSelected());
+            }
+        });
+        
+        panel.getChildren().addAll(devGoldBtn, devEnergyBtn, teleportCheatCheck);
         
         // Apply button
         Button applyBtn = createButton("Apply Settings");
@@ -398,6 +427,7 @@ public class InteractionMenu {
             settings.setSfxVolume((int) sfxSlider.getValue());
             settings.setAutoSave(autosaveCheck.isSelected());
             settings.setAutoSaveInterval((int) autosaveSlider.getValue());
+            settings.setTeleportCheatEnabled(teleportCheatCheck.isSelected());
             settings.save();
         });
         
@@ -549,6 +579,31 @@ public class InteractionMenu {
         this.onOpenRelationships = relationships;
         this.onOpenSkills = skills;
         this.onOpenJournal = journal;
+    }
+    
+    /**
+     * Sets the handler for opening the party management window.
+     */
+    public void setPartyHandler(Runnable partyHandler) {
+        this.onOpenParty = partyHandler;
+    }
+
+    /**
+     * Sets handlers for dev tools (cheats).
+     */
+    public void setDevToolHandlers(Runnable giveGold, Runnable refillEnergy, java.util.function.Consumer<Boolean> teleportToggle) {
+        this.onDevGiveGold = giveGold;
+        this.onDevRefillEnergy = refillEnergy;
+        this.onTeleportToggle = teleportToggle;
+    }
+
+    /**
+     * Syncs the teleport cheat checkbox with current setting.
+     */
+    public void syncTeleportCheat(boolean enabled) {
+        if (teleportCheatCheck != null) {
+            teleportCheatCheck.setSelected(enabled);
+        }
     }
     
     /**
