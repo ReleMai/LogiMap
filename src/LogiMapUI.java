@@ -61,6 +61,12 @@ public class LogiMapUI extends Application {
     private FloatingPanel gearFloatingPanel;
     private FloatingPanel inventoryFloatingPanel;
     
+    // NPC interaction and social systems
+    private NPCDialogueMenu npcDialogueMenu;
+    private RelationshipManager relationshipManager;
+    private SocialPanel socialPanel;
+    private FloatingPanel socialFloatingPanel;
+    
     // Callback for returning to main menu
     private Runnable onReturnToMenu;
     
@@ -111,6 +117,9 @@ public class LogiMapUI extends Application {
         // Configure stage
         primaryStage.setTitle("LogiMap - " + worldName);
         primaryStage.setScene(scene);
+        primaryStage.setResizable(true);
+        primaryStage.setMinWidth(1024);
+        primaryStage.setMinHeight(768);
         primaryStage.setMaximized(true);
         primaryStage.setOnShown(e -> mapCanvas.onStageReady());
         primaryStage.show();
@@ -304,6 +313,11 @@ public class LogiMapUI extends Application {
             // Skip dialogue and go straight to town menu
             if (townInteractionMenu != null) {
                 townInteractionMenu.showForTown(town, player);
+                // Update economic info (treasury & warehouse) for the town
+                if (mapCanvas != null && mapCanvas.getNPCManager() != null) {
+                    SettlementPopulation pop = mapCanvas.getNPCManager().getPopulationForTown(town);
+                    townInteractionMenu.updateEconomicInfo(pop, economySystem);
+                }
             }
             return;
         }
@@ -319,6 +333,10 @@ public class LogiMapUI extends Application {
                         // Player chose to enter - show town menu
                         if (townInteractionMenu != null) {
                             townInteractionMenu.showForTown(town, player);
+                            if (mapCanvas != null && mapCanvas.getNPCManager() != null) {
+                                SettlementPopulation pop = mapCanvas.getNPCManager().getPopulationForTown(town);
+                                townInteractionMenu.updateEconomicInfo(pop, economySystem);
+                            }
                         }
                     },
                     () -> {
@@ -333,6 +351,10 @@ public class LogiMapUI extends Application {
                         // Player chose to enter - show town menu
                         if (townInteractionMenu != null) {
                             townInteractionMenu.showForTown(town, player);
+                            if (mapCanvas != null && mapCanvas.getNPCManager() != null) {
+                                SettlementPopulation pop = mapCanvas.getNPCManager().getPopulationForTown(town);
+                                townInteractionMenu.updateEconomicInfo(pop, economySystem);
+                            }
                         }
                     },
                     () -> {
@@ -345,10 +367,29 @@ public class LogiMapUI extends Application {
     }
 
     private void handleNPCInteraction(NPC npc) {
-        if (npc == null || newsTicker == null) return;
-        String line = npc.getDialogue();
-        String message = npc.getName() + " (" + npc.getType().getName() + "): \"" + line + "\"";
-        newsTicker.addNewsItem(message);
+        if (npc == null) return;
+        
+        // Initialize relationship manager if needed
+        if (relationshipManager == null) {
+            relationshipManager = new RelationshipManager();
+        }
+        
+        // Show proper dialogue menu instead of just news ticker
+        if (npcDialogueMenu == null) {
+            npcDialogueMenu = new NPCDialogueMenu(relationshipManager);
+            npcDialogueMenu.setPlayer(player);
+            if (mapCanvas != null) {
+                npcDialogueMenu.setGameTime(mapCanvas.getGameTime());
+            }
+            npcDialogueMenu.setOnClose(closedNpc -> npcDialogueMenu.setVisible(false));
+            centerStack.getChildren().add(npcDialogueMenu);
+        }
+        
+        // Record the interaction with relationship manager
+        relationshipManager.recordInteraction(npc);
+        
+        // Show dialogue
+        npcDialogueMenu.show(npc);
     }
     
     /**
@@ -405,6 +446,11 @@ public class LogiMapUI extends Application {
         for (Town town : world.getTowns()) {
             economySystem.registerTown(town);
         }
+
+        // Provide economy reference to NPC manager for deliveries
+        if (mapCanvas != null && mapCanvas.getNPCManager() != null) {
+            mapCanvas.getNPCManager().setEconomySystem(economySystem);
+        }
         
         // Create marketplace UI
         marketplaceUI = new MarketplaceUI();
@@ -419,6 +465,10 @@ public class LogiMapUI extends Application {
             Town town = marketplaceUI.getCurrentTown();
             if (town != null && player != null) {
                 townInteractionMenu.showForTown(town, player);
+                if (mapCanvas != null && mapCanvas.getNPCManager() != null) {
+                    SettlementPopulation pop = mapCanvas.getNPCManager().getPopulationForTown(town);
+                    townInteractionMenu.updateEconomicInfo(pop, economySystem);
+                }
             }
         });
         
@@ -611,11 +661,6 @@ public class LogiMapUI extends Application {
      * Wires up control handlers from the interaction menu to map canvas.
      */
     private void wireControlHandlers() {
-        // Grid control handlers
-        interactionMenu.setGridControlHandlers(
-            factor -> mapCanvas.setGridBrightness(factor),
-            () -> mapCanvas.toggleGridNumbers()
-        );
         
         // Filter handlers
         interactionMenu.setFilterHandlers(
@@ -623,6 +668,9 @@ public class LogiMapUI extends Application {
             () -> mapCanvas.setMapFilter(new TopographicalFilter()),
             () -> mapCanvas.setMapFilter(new ResourceHeatmapFilter(mapCanvas.getWorld().getResourceMap()))
         );
+
+        // Heatmap toggle observer: show large resource icons when heatmap is active
+        interactionMenu.setHeatmapToggleHandler(selected -> mapCanvas.setShowLargeResourceIcons(selected));
         
         // Save/Load handlers
         interactionMenu.setSaveLoadHandlers(
@@ -781,16 +829,56 @@ public class LogiMapUI extends Application {
             case "Map":
                 menuPanel.setVisible(true);
                 mapCanvas.setMapMode("Map");
+                closeSocialPanel();
                 break;
                 
             case "Region":
                 menuPanel.setVisible(true);
                 mapCanvas.setMapMode("Region");
+                closeSocialPanel();
+                break;
+                
+            case "Social":
+                menuPanel.setVisible(true);
+                openSocialPanel();
                 break;
                 
             default:
                 menuPanel.setVisible(true);
                 break;
+        }
+    }
+    
+    /**
+     * Opens the social panel showing known NPCs.
+     */
+    private void openSocialPanel() {
+        // Initialize relationship manager if needed
+        if (relationshipManager == null) {
+            relationshipManager = new RelationshipManager();
+        }
+        
+        // Create social panel if needed
+        if (socialPanel == null) {
+            socialPanel = new SocialPanel(relationshipManager);
+            socialPanel.setOnNPCSelected(npc -> {
+                // Show dialogue when clicking an NPC in the list
+                if (npc != null && npcDialogueMenu != null) {
+                    npcDialogueMenu.show(npc);
+                }
+            });
+        }
+        
+        // Show social panel in the side menu
+        showInSidePanel(socialPanel);
+    }
+    
+    /**
+     * Closes the social panel and returns to controls.
+     */
+    private void closeSocialPanel() {
+        if (activeSidePanel == socialPanel) {
+            closeSidePanel();
         }
     }
     
@@ -1021,8 +1109,9 @@ public class LogiMapUI extends Application {
      * Opens the relationships panel.
      */
     private void openRelationships() {
-        // TODO: Implement relationships panel
-        newsTicker.addNewsItem("Relationships panel coming soon!");
+        // Switch to Social tab which shows the relationships panel
+        tabManager.getTabBar();  // Get access to tab bar
+        switchTab("Social");
     }
     
     /**

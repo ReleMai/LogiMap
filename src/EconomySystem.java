@@ -270,6 +270,20 @@ public class EconomySystem {
             }
         }
     }
+
+    /**
+     * Adds supply to a town's supply map (used when NPCs deliver goods).
+     */
+    public void addSupplyToTown(Town town, String resourceId, int quantity) {
+        if (town == null || resourceId == null || quantity <= 0) return;
+        Map<String, Integer> supply = townSupply.get(town);
+        if (supply == null) {
+            registerTown(town);
+            supply = townSupply.get(town);
+            if (supply == null) return;
+        }
+        supply.put(resourceId, supply.getOrDefault(resourceId, 0) + quantity);
+    }
     
     // ==================== PRICE CALCULATION ====================
     
@@ -330,6 +344,16 @@ public class EconomySystem {
      * Sells items to a town. Returns gold earned.
      */
     public int sellToTown(Town town, ResourceItem item, int quantity) {
+        if (town == null || item == null) return 0;
+
+        // Prevent selling to a town the resource it produces
+        String specific = town.getSpecificResourceId();
+        if (specific != null && specific.equals(item.getId())) {
+            // Not allowed to sell the town's own produced resource here
+            System.out.println("Sell blocked: " + town.getName() + " produces " + item.getId());
+            return 0;
+        }
+
         int unitPrice = getSellPrice(town, item);
         int actualQuantity = Math.min(quantity, item.getQuantity());
         int totalGold = unitPrice * actualQuantity;

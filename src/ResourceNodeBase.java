@@ -121,17 +121,27 @@ public abstract class ResourceNodeBase {
     }
     
     /**
-     * Updates the node state (regrowth, etc.)
+     * Updates the node state (regrowth, etc.) and respects game time multiplier.
      */
-    public void update() {
+    public void update(GameTime gameTime) {
+        double multiplier = gameTime != null ? gameTime.getTimeMultiplier() : 1.0;
+
         if (!isHarvestable && harvestsRemaining <= 0) {
-            long timeSinceHarvest = System.currentTimeMillis() - lastHarvestTime;
+            long timeSinceHarvest = (long)((System.currentTimeMillis() - lastHarvestTime) * multiplier);
             if (timeSinceHarvest >= regrowthTimeMs) {
                 // Regrow
                 harvestsRemaining = maxHarvests;
                 isHarvestable = true;
             }
         }
+    }
+
+    /**
+     * Backwards-compatible update() calling the new API with no time scaling.
+     */
+    @Deprecated
+    public void update() {
+        update(null);
     }
     
     /**

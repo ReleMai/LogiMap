@@ -100,8 +100,14 @@ public class DemoWorld {
         // Generate structures using intelligent placement
         generateDemoStructures();
         
+        // Generate roads connecting cities to villages
+        generateRoads();
+        
         // Generate resource nodes around specialized villages
         generateAllResourceNodes();
+        
+        // Add town-specific decorations (piers, mines, windmills)
+        generateTownDecorations();
         
         System.out.println("DemoWorld: Placed " + structures.size() + " structures");
         System.out.println("DemoWorld: Generated " + farmlandNodes.size() + " farmland nodes");
@@ -177,6 +183,24 @@ public class DemoWorld {
             
             // Classify the village based on terrain
             classifyVillage(town, rand);
+            
+            // Adjust placement for certain village types before placing
+            if (!town.isMajor()) {
+                VillageType vt = town.getVillageType();
+                if (vt == VillageType.MINING) {
+                    int[] rockSite = findNearestTerrainTile(town.getGridX(), town.getGridY(), 12, TerrainType.ROCKY_HILLS, TerrainType.HILLS);
+                    if (rockSite != null) {
+                        town.gridX = rockSite[0];
+                        town.gridY = rockSite[1];
+                    }
+                } else if (vt == VillageType.FISHING) {
+                    int[] coastal = findCoastalSite(town.getGridX(), town.getGridY(), 12);
+                    if (coastal != null) {
+                        town.gridX = coastal[0];
+                        town.gridY = coastal[1];
+                    }
+                }
+            }
             
             placeStructure(town);
         }
@@ -565,6 +589,186 @@ public class DemoWorld {
         return new int[]{x, y};
     }
     
+    /**
+     * Finds the nearest tile matching any of the specified terrain types within radius.
+     * Returns the coordinates of the first buildable tile that matches one of the types, or null.
+     */
+    private int[] findNearestTerrainTile(int x, int y, int radius, TerrainType... types) {
+        for (int r = 0; r <= radius; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dy = -r; dy <= r; dy++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dy)) != r) continue; // perimeter
+                    int nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
+                    TerrainType t = worldGen.getTerrain(nx, ny);
+                    if (t == null) continue;
+                    for (TerrainType tt : types) {
+                        if (t == tt && t.isBuildable()) {
+                            return new int[]{nx, ny};
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Finds the nearest coastal buildable tile (adjacent to water) within radius, or null.
+     */
+    private int[] findCoastalSite(int x, int y, int radius) {
+        for (int r = 0; r <= radius; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dy = -r; dy <= r; dy++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dy)) != r) continue;
+                    int nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
+                    TerrainType t = worldGen.getTerrain(nx, ny);
+                    if (t == null) continue;
+                    if (t.isWater() || !t.isBuildable()) continue;
+                    // check neighbor for water
+                    boolean adjWater = false;
+                    for (int ax = -1; ax <= 1 && !adjWater; ax++) {
+                        for (int ay = -1; ay <= 1 && !adjWater; ay++) {
+                            if (ax == 0 && ay == 0) continue;
+                            int wx = nx + ax, wy = ny + ay;
+                            if (wx < 0 || wy < 0 || wx >= MAP_WIDTH || wy >= MAP_HEIGHT) continue;
+                            TerrainType wt = worldGen.getTerrain(wx, wy);
+                            if (wt != null && wt.isWater()) adjWater = true;
+                        }
+                    }
+                    if (adjWater) return new int[]{nx, ny};
+                }
+            }
+        }
+        return null;
+    }
+    
+    // ==================== ROAD GENERATION ====================
+    
+    /**
+     * Generates roads connecting cities to their nearby villages.
+     * Cities are connected to all villages within a certain radius.
+     * Villages within the same region are also connected to each other.
+     */
+    private void generateRoads() {
+        System.out.println("=== Generating Road Network ===");
+        
+        // Separate cities and villages
+        List<Town> cities = new ArrayList<>();
+        List<Town> villages = new ArrayList<>();
+        
+        for (MapStructure structure : structures) {
+            if (structure instanceof Town town) {
+                if (town.isMajor()) {
+                    cities.add(town);
+                } else {
+                    villages.add(town);
+                }
+            }
+        }
+        
+        Random roadRand = new Random(seed + 77777);
+        int roadsCreated = 0;
+        
+        // Connect each city to nearby villages
+        for (Town city : cities) {
+            List<Town> nearbyVillages = findNearbyVillages(city, villages, 80);
+            
+            for (Town village : nearbyVillages) {
+                // Check if road doesn't already exist
+                if (roadNetwork.getRoadBetween(city, village) == null) {
+                    String roadName = generateRoadName(city, village, roadRand);
+                    roadNetwork.connectStructures(roadName, city, village);
+                    roadsCreated++;
+                    System.out.println("  Road: " + roadName + " (" + city.getName() + " <-> " + village.getName() + ")");
+                }
+            }
+        }
+        
+        // Connect nearby villages to each other (for local trade)
+        for (int i = 0; i < villages.size(); i++) {
+            Town village1 = villages.get(i);
+            for (int j = i + 1; j < villages.size(); j++) {
+                Town village2 = villages.get(j);
+                
+                // Only connect villages that are close (within 40 tiles)
+                double dist = getDistance(village1, village2);
+                if (dist <= 40 && roadNetwork.getRoadBetween(village1, village2) == null) {
+                    String roadName = generateRoadName(village1, village2, roadRand);
+                    roadNetwork.connectStructures(roadName, village1, village2);
+                    roadsCreated++;
+                    System.out.println("  Path: " + roadName + " (" + village1.getName() + " <-> " + village2.getName() + ")");
+                }
+            }
+        }
+        
+        // Connect cities to each other if they're close enough
+        for (int i = 0; i < cities.size(); i++) {
+            Town city1 = cities.get(i);
+            for (int j = i + 1; j < cities.size(); j++) {
+                Town city2 = cities.get(j);
+                
+                double dist = getDistance(city1, city2);
+                if (dist <= 100 && roadNetwork.getRoadBetween(city1, city2) == null) {
+                    String roadName = "The " + city1.getName() + "-" + city2.getName() + " Highway";
+                    roadNetwork.connectStructures(roadName, city1, city2);
+                    roadsCreated++;
+                    System.out.println("  Highway: " + roadName);
+                }
+            }
+        }
+        
+        System.out.println("=== Generated " + roadsCreated + " roads ===");
+    }
+    
+    /**
+     * Finds villages within a certain distance of a city.
+     */
+    private List<Town> findNearbyVillages(Town city, List<Town> villages, double maxDistance) {
+        List<Town> nearby = new ArrayList<>();
+        for (Town village : villages) {
+            double dist = getDistance(city, village);
+            if (dist <= maxDistance) {
+                nearby.add(village);
+            }
+        }
+        return nearby;
+    }
+    
+    /**
+     * Calculates distance between two towns.
+     */
+    private double getDistance(Town a, Town b) {
+        int ax = a.getGridX() + a.getSize() / 2;
+        int ay = a.getGridY() + a.getSize() / 2;
+        int bx = b.getGridX() + b.getSize() / 2;
+        int by = b.getGridY() + b.getSize() / 2;
+        return Math.sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
+    }
+    
+    /**
+     * Generates a thematic name for a road.
+     */
+    private String generateRoadName(Town from, Town to, Random rand) {
+        String[] prefixes = {
+            "The Old", "The King's", "The Merchant's", "The Trade", 
+            "The Forest", "The River", "The Mountain", "The Coastal",
+            "The Northern", "The Southern", "The Eastern", "The Western"
+        };
+        String[] suffixes = {
+            "Road", "Path", "Way", "Route", "Trail", "Lane"
+        };
+        
+        // Use shorter road or path if the distance is small
+        double dist = getDistance(from, to);
+        if (dist < 30) {
+            return from.getName() + " " + suffixes[rand.nextInt(suffixes.length)];
+        }
+        
+        return prefixes[rand.nextInt(prefixes.length)] + " " + suffixes[rand.nextInt(suffixes.length)];
+    }
+    
     // ==================== VILLAGE CLASSIFICATION ====================
     
     /**
@@ -577,7 +781,7 @@ public class DemoWorld {
         
         // Check terrain features around the village
         boolean nearWater = distanceToWater(x, y) < 15;
-        boolean nearMountain = hasTerrainNearby(x, y, 20, TerrainType.MOUNTAIN, TerrainType.ROCKY_HILLS);
+        boolean nearMountain = hasTerrainNearby(x, y, 25, TerrainType.MOUNTAIN, TerrainType.ROCKY_HILLS, TerrainType.HILLS);
         boolean nearForest = hasTerrainNearby(x, y, 15, TerrainType.FOREST, TerrainType.DENSE_FOREST, TerrainType.TAIGA);
         
         TerrainType centerTerrain = worldGen.getTerrain(x, y);
@@ -686,12 +890,12 @@ public class DemoWorld {
     }
     
     /**
-     * Checks if a town is near mountainous terrain.
+     * Checks if a town is near mountainous terrain (for ore generation).
      */
     private boolean isNearMountains(Town town) {
         int cx = town.getGridX() + town.getSize() / 2;
         int cy = town.getGridY() + town.getSize() / 2;
-        int searchRadius = 15;
+        int searchRadius = 20;
         
         for (int dy = -searchRadius; dy <= searchRadius; dy++) {
             for (int dx = -searchRadius; dx <= searchRadius; dx++) {
@@ -699,13 +903,97 @@ public class DemoWorld {
                 int y = cy + dy;
                 if (x >= 0 && y >= 0 && x < MAP_WIDTH && y < MAP_HEIGHT) {
                     TerrainType t = worldGen.getTerrain(x, y);
-                    if (t == TerrainType.MOUNTAIN || t == TerrainType.ROCKY_HILLS) {
+                    if (t == TerrainType.MOUNTAIN || t == TerrainType.ROCKY_HILLS || t == TerrainType.HILLS) {
                         return true;
                     }
                 }
             }
         }
         return false;
+    }
+
+    /**
+     * Adds town-specific decorations such as piers for fishing towns, mine POIs and rock piles for mining towns,
+     * and windmills for agricultural villages.
+     */
+    private void generateTownDecorations() {
+        List<TerrainDecoration> decs = worldGen.getDecorations();
+        Random dRand = new Random(seed + 4242);
+        
+        for (MapStructure s : structures) {
+            if (!(s instanceof Town)) continue;
+            Town town = (Town) s;
+            int gx = town.getGridX() + town.getSize() / 2;
+            int gy = town.getGridY() + town.getSize() / 2;
+            VillageType vt = town.getVillageType();
+            
+            if (vt == VillageType.FISHING) {
+                // Place 1-3 piers on nearest coastal spots
+                int placed = 0;
+                for (int r = 1; r <= 8 && placed < 3; r++) {
+                    for (int dx = -r; dx <= r && placed < 3; dx++) {
+                        for (int dy = -r; dy <= r && placed < 3; dy++) {
+                            int nx = gx + dx, ny = gy + dy;
+                            if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
+                            TerrainType t = worldGen.getTerrain(nx, ny);
+                            if (t == null || t.isWater()) continue;
+                            // check adjacent water direction
+                            boolean found = false;
+                            for (int ax = -1; ax <= 1 && !found; ax++) {
+                                for (int ay = -1; ay <= 1 && !found; ay++) {
+                                    if (ax == 0 && ay == 0) continue;
+                                    int wx = nx + ax, wy = ny + ay;
+                                    if (wx < 0 || wy < 0 || wx >= MAP_WIDTH || wy >= MAP_HEIGHT) continue;
+                                    TerrainType wt = worldGen.getTerrain(wx, wy);
+                                    if (wt != null && wt.isWater()) {
+                                        // add pier at (nx, ny)
+                                        // compute rotation so pier faces the water (angle from land tile to water tile)
+                                        double angleRad = Math.atan2(wy - ny, wx - nx);
+                                        double angleDeg = Math.toDegrees(angleRad);
+                                        decs.add(new TerrainDecoration(nx, ny, TerrainDecoration.Category.PIER, dRand.nextInt(10), 0.6 + dRand.nextDouble() * 0.4, angleDeg));
+                                        // add a coral in adjacent shallow water
+                                        if (wt == TerrainType.SHALLOW_WATER && dRand.nextDouble() < 0.6) {
+                                            decs.add(new TerrainDecoration(wx, wy, TerrainDecoration.Category.CORAL, dRand.nextInt(10), 0.4 + dRand.nextDouble() * 0.3, 0));
+                                        }
+                                        placed++;
+                                        found = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (vt == VillageType.MINING) {
+                // Add small rock piles and a mine POI
+                int added = 0;
+                for (int r = 1; r <= 6 && added < 4; r++) {
+                    for (int dx = -r; dx <= r && added < 4; dx++) {
+                        for (int dy = -r; dy <= r && added < 4; dy++) {
+                            int nx = gx + dx, ny = gy + dy;
+                            if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
+                            TerrainType t = worldGen.getTerrain(nx, ny);
+                            if (t == TerrainType.ROCKY_HILLS || t == TerrainType.HILLS) {
+                                decs.add(new TerrainDecoration(nx, ny, TerrainDecoration.Category.ROCK, dRand.nextInt(10), 0.5 + dRand.nextDouble() * 0.6, dRand.nextDouble() * 20 - 10));
+                                added++;
+                            }
+                        }
+                    }
+                }
+                // Add a mine POI near the town center
+                pointsOfInterest.add(new PointOfInterest(gx + (dRand.nextInt(5) - 2), gy + (dRand.nextInt(5) - 2), "Mine Shaft", PoiType.RESOURCE));
+            }
+            
+            if (vt == VillageType.AGRICULTURAL) {
+                // Add a windmill decoration near the town center
+                int wx = gx + (dRand.nextInt(5) - 2);
+                int wy = gy + (dRand.nextInt(5) - 2);
+                if (wx >= 0 && wy >= 0 && wx < MAP_WIDTH && wy < MAP_HEIGHT) {
+                    decs.add(new TerrainDecoration(wx, wy, TerrainDecoration.Category.WINDMILL, dRand.nextInt(10), 0.8 + dRand.nextDouble() * 0.6, 0));
+                }
+            }
+        }
     }
     
     // === Farmland Generation ===
@@ -1063,10 +1351,11 @@ public class DemoWorld {
         TerrainType t = worldGen.getTerrain(x, y);
         if (t == null || t.isWater()) return false;
         
-        // Must be rocky/mountain terrain for ore
+        // Prefer rocky/mountain terrain for ore, but allow hilly areas too
         return t == TerrainType.MOUNTAIN || 
                t == TerrainType.ROCKY_HILLS || 
-               t == TerrainType.HILLS;
+               t == TerrainType.HILLS ||
+               t == TerrainType.TUNDRA;
     }
     
     // === Pastoral Node Generation ===

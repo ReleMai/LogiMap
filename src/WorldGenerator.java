@@ -119,6 +119,14 @@ public class WorldGenerator {
         System.out.println("  - Classifying water...");
         System.out.flush();
         classifyWater();
+        // New: generate coral reefs in suitable shallow warm waters
+        System.out.println("  - Generating reefs...");
+        System.out.flush();
+        generateReefs();
+        // New: generate volcanic features on warm mountain peaks
+        System.out.println("  - Generating volcanoes...");
+        System.out.flush();
+        generateVolcanoes();
         System.out.println("  - Generating points of interest...");
         System.out.flush();
         generatePointsOfInterest();
@@ -131,6 +139,18 @@ public class WorldGenerator {
         
         System.out.println("WorldGenerator: Generation complete!");
         System.out.flush();
+        // Quick summary counts for new biomes
+        int tundraCount = 0, reefCount = 0, volcanoCount = 0, lavaCount = 0;
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                TerrainType t = terrain[x][y];
+                if (t == TerrainType.TUNDRA) tundraCount++;
+                if (t == TerrainType.REEF) reefCount++;
+                if (t == TerrainType.VOLCANO) volcanoCount++;
+                if (t == TerrainType.LAVA) lavaCount++;
+            }
+        }
+        System.out.println("  Biome summary: Tundra=" + tundraCount + ", Reef=" + reefCount + ", Volcano=" + volcanoCount + ", Lava=" + lavaCount);
     }
     
     // ==================== ELEVATION GENERATION ====================
@@ -760,12 +780,97 @@ public class WorldGenerator {
                 r = rand.nextDouble();
                 if (r < 0.6) return TerrainDecoration.Category.ROCK;
                 return TerrainDecoration.Category.GRASS;
-                
+
+            case REEF:
+                r = rand.nextDouble();
+                if (r < 0.6) return TerrainDecoration.Category.CORAL;
+                if (r < 0.9) return TerrainDecoration.Category.ROCK;
+                return null;
+
+            case VOLCANO:
+                r = rand.nextDouble();
+                if (r < 0.5) return TerrainDecoration.Category.ROCK;
+                if (r < 0.85) return TerrainDecoration.Category.ASH;
+                return null;
+
             default:
                 return TerrainDecoration.Category.GRASS;
         }
     }
     
+    /**
+     * Generates coral reef tiles in warm, shallow water near land.
+     */
+    private void generateReefs() {
+        Random reefRand = new Random(config.seed + 5555);
+
+        for (int x = 1; x < width - 1; x++) {
+            for (int y = 1; y < height - 1; y++) {
+                if (terrain[x][y] != TerrainType.SHALLOW_WATER) continue;
+
+                // Conditions: warm water, near land, and a favorable noise value
+                double temp = temperature[x][y];
+                if (temp < 0.58) continue; // reefs prefer warm waters
+
+                boolean nearLand = false;
+                for (int dx = -2; dx <= 2 && !nearLand; dx++) {
+                    for (int dy = -2; dy <= 2 && !nearLand; dy++) {
+                        int nx = x + dx, ny = y + dy;
+                        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                        TerrainType nt = terrain[nx][ny];
+                        if (!nt.isWater()) nearLand = true;
+                    }
+                }
+                if (!nearLand) continue;
+
+                double n = octaveNoise(x, y, detailSeed + 600, 0.04, 2, 0.5);
+                if (n > 0.62 && reefRand.nextDouble() < 0.25) {
+                    terrain[x][y] = TerrainType.REEF;
+                }
+            }
+        }
+    }
+
+    /**
+     * Generates volcano tiles (small clusters) on warm mountain terrain and "lava" patches adjacent.
+     */
+    private void generateVolcanoes() {
+        Random vRand = new Random(config.seed + 6666);
+
+        for (int x = 2; x < width - 2; x++) {
+            for (int y = 2; y < height - 2; y++) {
+                if (terrain[x][y] != TerrainType.MOUNTAIN) continue;
+
+                // Volcanoes prefer warmer mountain areas
+                double temp = temperature[x][y];
+                if (temp < 0.35) continue;
+
+                double n = octaveNoise(x, y, mountainSeed + 500, 0.02, 2, 0.5);
+                if (n > 0.92 && vRand.nextDouble() < 0.06) {
+                    // Mark a small crater
+                    terrain[x][y] = TerrainType.VOLCANO;
+
+                    // Create some lava/charred tiles around the crater
+                    int radius = 1 + vRand.nextInt(2);
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        for (int dy = -radius; dy <= radius; dy++) {
+                            int nx = x + dx, ny = y + dy;
+                            if (nx <= 0 || ny <= 0 || nx >= width - 1 || ny >= height - 1) continue;
+                            if (terrain[nx][ny].isWater()) continue;
+
+                            if (vRand.nextDouble() < 0.45) {
+                                terrain[nx][ny] = TerrainType.LAVA;
+                            }
+                        }
+                    }
+
+                    // Add a Point of Interest for the volcano
+                    pointsOfInterest.add(new PointOfInterest(x, y, "Volcano", PoiType.LANDMARK));
+                }
+            }
+        }
+    }
+
     // ==================== PUBLIC GETTERS ====================
     
     public TerrainType[][] getTerrain() { return terrain; }

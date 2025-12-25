@@ -13,7 +13,11 @@ public class TerrainDecoration {
     public enum Category {
         GRASS("grass", "plains", "meadow", "savanna"),
         ROCK("rocky", "mountain", "hills", "desert"),
-        TREE("forest", "woodland", "taiga", "jungle");
+        TREE("forest", "woodland", "taiga", "jungle"),
+        CORAL("reef", "coastal"),
+        ASH("volcano", "lava", "charred"),
+        PIER("pier", "coastal"),
+        WINDMILL("farm", "agricultural");
         
         private final Set<String> validTags;
         
@@ -50,8 +54,11 @@ public class TerrainDecoration {
             case SAVANNA: tags.addAll(Arrays.asList("savanna", "grass", "arid")); break;
             case SCRUBLAND: tags.addAll(Arrays.asList("scrubland", "arid")); break;
             case BEACH: tags.addAll(Arrays.asList("beach", "coastal")); break;
+            case REEF: tags.addAll(Arrays.asList("reef", "coastal")); break;
             case SWAMP: tags.addAll(Arrays.asList("swamp", "wetland")); break;
             case MARSH: tags.addAll(Arrays.asList("marsh", "wetland")); break;
+            case VOLCANO: tags.addAll(Arrays.asList("volcano", "lava")); break;
+            case LAVA: tags.addAll(Arrays.asList("lava", "charred")); break;
             case TUNDRA: tags.addAll(Arrays.asList("tundra", "cold")); break;
             case SNOW: tags.addAll(Arrays.asList("snow", "cold")); break;
             default: break;
@@ -102,6 +109,10 @@ public class TerrainDecoration {
             case GRASS: renderGrass(gc, renderSize); break;
             case ROCK: renderRock(gc, renderSize); break;
             case TREE: renderTree(gc, renderSize); break;
+            case CORAL: renderCoral(gc, renderSize); break;
+            case ASH: renderAsh(gc, renderSize); break;
+            case PIER: renderPier(gc, renderSize); break;
+            case WINDMILL: renderWindmill(gc, renderSize); break;
         }
         
         gc.restore();
@@ -461,6 +472,78 @@ public class TerrainDecoration {
         gc.setLineWidth(1);
         gc.strokeLine(-size * 0.35, -size * 0.5, -size * 0.4, -size * 0.1);
         gc.strokeLine(size * 0.3, -size * 0.55, size * 0.35, -size * 0.15);
+    }
+    
+    // ==================== CORAL & ASH SPRITES ====================
+    
+    private void renderCoral(GraphicsContext gc, double size) {
+        // Coral cluster - colorful small rounded forms
+        Color[] palette = { Color.web("#ff6a00"), Color.web("#ff9a80"), Color.web("#b000b0"), Color.web("#3ab0ff") };
+        for (int i = 0; i < 4; i++) {
+            double ang = i * Math.PI * 0.5 + (i % 2 == 0 ? -0.3 : 0.2);
+            double ox = Math.cos(ang) * size * 0.18;
+            double oy = Math.sin(ang) * size * 0.12;
+            gc.setFill(palette[i]);
+            gc.fillOval(ox - size * 0.18, oy - size * 0.18, size * 0.36, size * 0.36);
+            gc.setFill(palette[i].brighter());
+            gc.fillOval(ox - size * 0.08, oy - size * 0.08, size * 0.16, size * 0.16);
+        }
+        // Small anemone tentacle strokes
+        gc.setStroke(Color.web("#ffb380"));
+        gc.setLineWidth(Math.max(1, size * 0.06));
+        for (int i = 0; i < 6; i++) {
+            double a = i * Math.PI * 2 / 6;
+            gc.strokeLine(Math.cos(a) * size * 0.05, Math.sin(a) * size * 0.05, Math.cos(a) * size * 0.25, Math.sin(a) * size * 0.25);
+        }
+    }
+    
+    private void renderAsh(GraphicsContext gc, double size) {
+        // Charred rock with smoke puffs
+        Color base = Color.web("#4a4038");
+        gc.setFill(base);
+        gc.fillOval(-size * 0.35, -size * 0.15, size * 0.7, size * 0.3);
+        gc.setFill(base.darker());
+        gc.fillOval(-size * 0.15, -size * 0.3, size * 0.3, size * 0.18);
+
+        // Smoke puffs above
+        gc.setFill(Color.web("#888888", 0.35));
+        gc.fillOval(-size * 0.25, -size * 0.6, size * 0.5, size * 0.25);
+        gc.fillOval(-size * 0.1, -size * 0.75, size * 0.25, size * 0.18);
+    }
+    
+    // ==================== PIER & WINDMILL SPRITES ====================
+    
+    private void renderPier(GraphicsContext gc, double size) {
+        // Simple wooden pier with posts and planks, oriented outward
+        gc.setFill(Color.web("#8b7355"));
+        // Plank platform
+        gc.fillRect(-size * 0.4, -size * 0.1, size * 0.8, size * 0.15);
+        // Pier walkway
+        gc.fillRect(-size * 0.05, 0, size * 0.1, size * 0.7);
+        // Posts
+        gc.setFill(Color.web("#5a4a3a"));
+        for (double px = -0.35; px <= 0.35; px += 0.15) {
+            gc.fillRect(px * size, size * 0.05, size * 0.03, size * 0.35);
+        }
+        // Small fishing nets/boxes
+        gc.setFill(Color.web("#3a3a3a"));
+        gc.fillRect(-size * 0.3, size * 0.05, size * 0.08, size * 0.06);
+        gc.fillRect(size * 0.18, size * 0.05, size * 0.08, size * 0.06);
+    }
+    
+    private void renderWindmill(GraphicsContext gc, double size) {
+        // Windmill: stone base + rotating blades
+        gc.setFill(Color.web("#d4c9b0"));
+        gc.fillRect(-size * 0.12, -size * 0.35, size * 0.24, size * 0.35);
+        // Roof
+        gc.setFill(Color.web("#8b4513"));
+        gc.fillPolygon(new double[]{-size * 0.16, 0, size * 0.16}, new double[]{-size * 0.35, -size * 0.5, -size * 0.35}, 3);
+        // Blades
+        gc.setStroke(Color.web("#ffffff", 0.9));
+        gc.setLineWidth(Math.max(1, size * 0.04));
+        gc.strokeLine(0, -size * 0.45, 0, -size * 0.65);
+        gc.strokeLine(-size * 0.08, -size * 0.56, size * 0.08, -size * 0.56);
+        gc.strokeLine(-size * 0.06, -size * 0.62, size * 0.06, -size * 0.50);
     }
     
     // Getters

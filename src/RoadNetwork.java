@@ -89,4 +89,55 @@ public class RoadNetwork {
         }
         return null;
     }
+    
+    /**
+     * Checks if a world position is on any road.
+     */
+    public boolean isOnRoad(double worldX, double worldY) {
+        return getRoadQualityAt((int) worldX, (int) worldY) != null;
+    }
+    
+    /**
+     * Gets the speed multiplier at a position (1.0 if not on road).
+     */
+    public double getSpeedMultiplierAt(double worldX, double worldY) {
+        RoadQuality quality = getRoadQualityAt((int) worldX, (int) worldY);
+        if (quality != null) {
+            return quality.getSpeedMultiplier();
+        }
+        return 1.0;
+    }
+    
+    /**
+     * Gets the road connecting two structures, if any.
+     */
+    public Road getRoadBetween(MapStructure a, MapStructure b) {
+        for (Road road : roads) {
+            if ((road.getStartPoint() == a && road.getEndPoint() == b) ||
+                (road.getStartPoint() == b && road.getEndPoint() == a)) {
+                return road;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Gets all roads connected to a structure.
+     */
+    public List<Road> getRoadsFrom(MapStructure structure) {
+        List<Road> result = new ArrayList<>();
+        for (Road road : roads) {
+            if (road.getStartPoint() == structure || road.getEndPoint() == structure) {
+                result.add(road);
+            }
+        }
+        return result;
+    }
+    
+    /**
+     * Checks if a tile should block resource spawning (is part of a road).
+     */
+    public boolean isRoadTile(int gridX, int gridY) {
+        return getRoadQualityAt(gridX, gridY) != null;
+    }
 }

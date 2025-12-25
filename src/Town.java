@@ -26,6 +26,13 @@ public class Town extends MapStructure {
     private TavernNPC[] tavernNPCs;
     private boolean tavernPopulated = false;
     
+    // Visual variant for rendering (0-3)
+    private int visualVariant;
+    
+    // Entrance points for roads and NPCs
+    private int entranceX;
+    private int entranceY;
+    
     public Town(int gridX, int gridY, String name, boolean isMajor) {
         super(gridX, gridY, name, isMajor ? 8 : 4, 
               isMajor ? Color.web("#d4a574") : Color.web("#c9956d"), 
@@ -34,6 +41,13 @@ public class Town extends MapStructure {
         this.isMajor = isMajor;
         this.population = isMajor ? 50000 : 10000;
         this.tradeValue = isMajor ? 500 : 100;
+        
+        // Set visual variant based on position hash for consistency (5 variants)
+        this.visualVariant = Math.abs((gridX * 31 + gridY * 17) % 5);
+        
+        // Set entrance at the south side of town (center bottom)
+        this.entranceX = gridX + size / 2;
+        this.entranceY = gridY + size;
         
         // Major towns have mixed economy and always have inns
         // Minor towns get classified with a specific type
@@ -65,8 +79,52 @@ public class Town extends MapStructure {
         this.hasInn = Math.random() < 0.3; // 30% of villages have inns
         this.innCost = 2; // Cheaper than cities
         
+        // Set visual variant based on position hash for consistency (5 variants)
+        this.visualVariant = Math.abs((gridX * 31 + gridY * 17) % 5);
+        
+        // Set entrance at the south side of town (center bottom)
+        this.entranceX = gridX + size / 2;
+        this.entranceY = gridY + size;
+        
         // Initialize warehouse
         this.warehouse = new TownWarehouse(name, false);
+    }
+    
+    // ==================== Entrance/Position Methods ====================
+    
+    /**
+     * Gets the entrance X coordinate (where roads connect and NPCs enter).
+     */
+    public int getEntranceX() {
+        return entranceX;
+    }
+    
+    /**
+     * Gets the entrance Y coordinate.
+     */
+    public int getEntranceY() {
+        return entranceY;
+    }
+    
+    /**
+     * Gets the center X coordinate of the town.
+     */
+    public int getCenterX() {
+        return gridX + size / 2;
+    }
+    
+    /**
+     * Gets the center Y coordinate of the town.
+     */
+    public int getCenterY() {
+        return gridY + size / 2;
+    }
+    
+    /**
+     * Gets the visual variant (0-3) for rendering different town sprites.
+     */
+    public int getVisualVariant() {
+        return visualVariant;
     }
     
     public boolean isMajor() {
@@ -93,6 +151,47 @@ public class Town extends MapStructure {
     
     public void setSpecificResource(Object resource) {
         this.specificResource = resource;
+    }
+
+    /**
+     * Returns the canonical item ID for the town's specific resource, or null if none.
+     */
+    public String getSpecificResourceId() {
+        if (specificResource == null) return null;
+        if (specificResource instanceof GrainType) {
+            return "grain_" + ((GrainType) specificResource).name().toLowerCase();
+        } else if (specificResource instanceof WoodType) {
+            return "timber_" + ((WoodType) specificResource).name().toLowerCase();
+        } else if (specificResource instanceof StoneType) {
+            return "stone_" + ((StoneType) specificResource).name().toLowerCase();
+        } else if (specificResource instanceof FishType) {
+            return "fish_" + ((FishType) specificResource).name().toLowerCase();
+        } else if (specificResource instanceof OreType) {
+            return "ore_" + ((OreType) specificResource).name().toLowerCase();
+        } else if (specificResource instanceof LivestockType) {
+            return ((LivestockType) specificResource).getItemId();
+        }
+        return null;
+    }
+
+    /**
+     * Checks if this town produces the given high-level resource category.
+     * Used by NPC parties to avoid selling local goods back to producers.
+     */
+    public boolean producesResourceType(ResourceType type) {
+        if (specificResource == null) return false;
+        if (type == ResourceType.FERTILITY) {
+            return specificResource instanceof GrainType || specificResource instanceof LivestockType;
+        } else if (type == ResourceType.WOOD) {
+            return specificResource instanceof WoodType;
+        } else if (type == ResourceType.STONE) {
+            return specificResource instanceof StoneType || specificResource instanceof OreType;
+        } else if (type == ResourceType.ORE) {
+            return specificResource instanceof OreType;
+        } else if (type == ResourceType.FISH) {
+            return specificResource instanceof FishType;
+        }
+        return false;
     }
     
     public boolean hasInn() {

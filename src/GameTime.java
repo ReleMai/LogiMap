@@ -240,6 +240,13 @@ public class GameTime {
     public TimeOfDay getTimeOfDay() {
         return cachedTimeOfDay;
     }
+
+    /**
+     * Gets the current hour of the day (0-23).
+     */
+    public int getHourOfDay() {
+        return currentHour;
+    }
     
     /**
      * Calculates and returns the current time of day.

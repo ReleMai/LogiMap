@@ -241,8 +241,28 @@ public class NPCParty {
             case TRADING:
                 // Sell resources at town
                 if (taskTimer > 2) {
-                    // Clear inventory (simulate selling)
-                    sharedInventory.clear();
+                    // Remove only resources that the destination WOULD buy here;
+                    // keep resources that match destination's production so parties travel instead of selling locally.
+                    if (destination != null) {
+                        Map<ResourceType, Integer> remaining = new java.util.HashMap<>();
+                        for (Map.Entry<ResourceType, Integer> e : sharedInventory.entrySet()) {
+                            ResourceType type = e.getKey();
+                            int amt = e.getValue();
+                            if (destination.producesResourceType(type)) {
+                                // Keep this resource, do not sell here
+                                remaining.put(type, remaining.getOrDefault(type, 0) + amt);
+                                System.out.println("Party: kept " + amt + " " + type + " at " + destination.getName() + " (local product)");
+                            } else {
+                                // Selling at destination - could add economy effects here later
+                                System.out.println("Party: sold " + amt + " " + type + " at " + destination.getName());
+                            }
+                        }
+                        sharedInventory.clear();
+                        sharedInventory.putAll(remaining);
+                    } else {
+                        // No destination: clear inventory as before
+                        sharedInventory.clear();
+                    }
                     
                     // Pick new destination
                     pickNewTask(allTowns);

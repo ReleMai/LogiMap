@@ -9,6 +9,9 @@ import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Comparator;
 import java.util.function.Consumer;
 
 /**
@@ -72,10 +75,14 @@ public class MapCanvas {
     private int tooltipGridY = -1;
     private double tooltipScreenX = 0;
     private double tooltipScreenY = 0;
+
+    // NPC hover tooltip
+    private NPC hoveredNPC = null;
+    private double hoveredNPCScreenX = 0;
+    private double hoveredNPCScreenY = 0;
     
     // Grid display options
     private double gridBrightness = 1.0;
-    private boolean showGridNumbers = false;
     
     // Camera follow state
     private boolean cameraFollowPlayer = false;  // Whether camera is following player
@@ -98,6 +105,18 @@ public class MapCanvas {
     private static final double LOD_THRESHOLD_1 = 0.15;  // Very low zoom - render in blocks
     private static final double LOD_THRESHOLD_2 = 0.08;  // Ultra low zoom - larger blocks
     private static final double LOD_THRESHOLD_3 = 0.04;  // Minimal zoom - very large blocks
+
+    // Large resource icon mode when heatmap is active and zoomed out
+    private boolean showLargeResourceIcons = false;
+    private static final double LARGE_ICON_ZOOM_THRESHOLD = 0.30; // Show large icons when zoom <= this
+
+    /**
+     * Sets whether large resource icons should be shown when zoomed out.
+     */
+    public void setShowLargeResourceIcons(boolean show) {
+        this.showLargeResourceIcons = show;
+        render();
+    }
     
     /**
      * Creates a MapCanvas with a new default world.
@@ -116,8 +135,11 @@ public class MapCanvas {
         this.world = world;
         currentFilter = new StandardFilter();
         npcManager = new NPCManager();
+        npcManager.setRoadNetwork(world.getRoadNetwork()); // Set road network before populating
         npcManager.populateAllTowns(world.getTowns());
         npcManager.spawnRoamers(world.getTowns());
+        npcManager.setGameTime(this.gameTime); // Allow scheduling decisions using game time
+        npcManager.assignVillagerJobs(); // Assign jobs to villager NPCs
         
         // Initialize movement flag
         this.movementFlag = new MovementFlag();
@@ -212,11 +234,13 @@ public class MapCanvas {
      * Also advances game time constantly.
      */
     public void update(double deltaTime) {
-        // Sync game speed from settings to GameTime
+        // Sync game speed from settings to GameTime, but do not override when an action progress temporarily changes speed
         if (gameTime != null) {
             double settingsSpeed = GameSettings.getInstance().getGameSpeed();
-            if (Math.abs(gameTime.getTimeMultiplier() - settingsSpeed) > 0.01) {
-                gameTime.setTimeMultiplier(settingsSpeed);
+            if (actionProgress == null || !actionProgress.isInProgress()) {
+                if (Math.abs(gameTime.getTimeMultiplier() - settingsSpeed) > 0.01) {
+                    gameTime.setTimeMultiplier(settingsSpeed);
+                }
             }
         }
         
@@ -238,6 +262,16 @@ public class MapCanvas {
         // Update action progress
         if (actionProgress != null) {
             actionProgress.update(deltaTime);
+        }
+
+        // Update resource nodes and farmlands so regrowth respects GameTime multiplier
+        if (world != null && gameTime != null) {
+            for (FarmlandNode farm : world.getFarmlandNodes()) {
+                farm.update(gameTime);
+            }
+            for (ResourceNodeBase node : world.getAllResourceNodes()) {
+                node.update(gameTime);
+            }
         }
         
         if (player != null) {
@@ -419,15 +453,31 @@ public class MapCanvas {
                 ctrlHeld = true;
                 render();
             } else if (e.getCode() == KeyCode.SPACE) {
-                // Toggle pause (only if no action in progress)
-                if (gameTime != null && (actionProgress == null || !actionProgress.isInProgress())) {
+                // Toggle pause (allow during actions)
+                if (gameTime != null) {
                     gameTime.togglePause();
                     render();
                 }
             } else if (e.getCode() == KeyCode.F) {
-                // Toggle fast forward (2x speed, only if no action in progress)
-                if (gameTime != null && (actionProgress == null || !actionProgress.isInProgress())) {
-                    gameTime.toggleSpeed();
+                // Cycle speed presets (0.5x -> 1x -> 2x -> 4x) and apply immediately
+                GameSettings.getInstance().cycleGameSpeed();
+                if (gameTime != null) {
+                    gameTime.setTimeMultiplier(GameSettings.getInstance().getGameSpeed());
+                    render();
+                }
+            } else if (e.getCode() == KeyCode.I) {
+                // Inspect hovered NPC when 'I' pressed
+                if (hoveredNPC != null && player != null) {
+                    // If player is near, open dialogue immediately, otherwise move to interact
+                    if (isPlayerNearNPC(hoveredNPC)) {
+                        triggerNPCInteraction(hoveredNPC);
+                    } else if (GameSettings.getInstance().isMoveToInteract()) {
+                        int tx = (int) Math.round(hoveredNPC.getWorldX());
+                        int ty = (int) Math.round(hoveredNPC.getWorldY());
+                        player.moveTo(tx, ty);
+                        if (movementFlag != null) movementFlag.setPosition(tx, ty);
+                        pendingNPCInteraction = hoveredNPC;
+                    }
                     render();
                 }
             }
@@ -469,19 +519,16 @@ public class MapCanvas {
             // Check for time control button clicks first
             int timeBtn = getTimeButtonAt(e.getX(), e.getY());
             if (timeBtn == 1 && gameTime != null) {
-                // Pause button clicked
-                if (actionProgress == null || !actionProgress.isInProgress()) {
-                    gameTime.togglePause();
-                    render();
-                    return;
-                }
+                // Pause button clicked (always allowed)
+                gameTime.togglePause();
+                render();
+                return;
             } else if (timeBtn == 2 && gameTime != null) {
-                // Speed button clicked
-                if (actionProgress == null || !actionProgress.isInProgress()) {
-                    gameTime.toggleSpeed();
-                    render();
-                    return;
-                }
+                // Speed button clicked: cycle presets (0.5x -> 1.0x -> 2.0x -> 4.0x)
+                GameSettings.getInstance().cycleGameSpeed();
+                gameTime.setTimeMultiplier(GameSettings.getInstance().getGameSpeed());
+                render();
+                return;
             } else if (timeBtn == 3) {
                 // Center to player button clicked
                 centerOnPlayer();
@@ -580,7 +627,8 @@ public class MapCanvas {
         }
         
         // Check for NPC interaction first (use grid coords for click detection)
-        NPC clickedNPC = npcManager != null ? npcManager.getNPCAt(gridX + 0.5, gridY + 0.5, 1.5) : null;
+        // Use tighter hitbox radius (0.8) to prevent accidental clicks on distant NPCs
+        NPC clickedNPC = npcManager != null ? npcManager.getNPCAt(gridX + 0.5, gridY + 0.5, 0.8) : null;
         if (clickedNPC != null) {
             if (isPlayerNearNPC(clickedNPC)) {
                 triggerNPCInteraction(clickedNPC);
@@ -680,6 +728,7 @@ public class MapCanvas {
         
         ResourceNodeBase closest = null;
         double closestDist = Double.MAX_VALUE;
+        int expandedHitBox = 2; // Extra tiles around the node for easier clicking
         
         for (ResourceNodeBase node : allNodes) {
             int nodeX = (int) node.getWorldX();
@@ -687,8 +736,8 @@ public class MapCanvas {
             int nodeSize = (int) Math.max(3, node.getSize()); // Minimum size of 3 for hit detection
             
             // Check if click is within the node's expanded grid bounds
-            if (gridX >= nodeX - 1 && gridX < nodeX + nodeSize + 1 &&
-                gridY >= nodeY - 1 && gridY < nodeY + nodeSize + 1) {
+            if (gridX >= nodeX - expandedHitBox && gridX < nodeX + nodeSize + expandedHitBox &&
+                gridY >= nodeY - expandedHitBox && gridY < nodeY + nodeSize + expandedHitBox) {
                 // Calculate distance to node center
                 double dx = gridX - (nodeX + nodeSize / 2.0);
                 double dy = gridY - (nodeY + nodeSize / 2.0);
@@ -775,6 +824,20 @@ public class MapCanvas {
             tooltipScreenY = e.getY();
         }
         
+        // NPC hover detection (tight hit radius)
+        if (npcManager != null) {
+            double worldX = gridPos[0] + 0.5;
+            double worldY = gridPos[1] + 0.5;
+            NPC n = npcManager.getNPCAt(worldX, worldY, 0.8);
+            if (n != null) {
+                hoveredNPC = n;
+                hoveredNPCScreenX = e.getX();
+                hoveredNPCScreenY = e.getY();
+            } else {
+                hoveredNPC = null;
+            }
+        }
+
         render();
     }
     
@@ -831,6 +894,11 @@ public class MapCanvas {
         if (ctrlHeld && tooltipGridX >= 0 && tooltipGridY >= 0) {
             renderTileTooltip();
         }
+
+        // NPC hover tooltip
+        if (hoveredNPC != null) {
+            renderNPCTooltip();
+        }
         
         // Render UI
         renderDayNightOverlay(width, height);
@@ -861,6 +929,60 @@ public class MapCanvas {
         double tileSize = GRID_SIZE * zoom;
         
         movementFlag.render(gc, pos[0], pos[1], tileSize);
+    }
+
+    private void renderNPCTooltip() {
+        if (hoveredNPC == null) return;
+        double x = hoveredNPCScreenX + 12;
+        double y = hoveredNPCScreenY + 12;
+        double w = 180;
+        double h = 64;
+
+        gc.setFill(Color.web("rgba(18,18,24,0.95)"));
+        gc.fillRoundRect(x, y, w, h, 6, 6);
+        gc.setStroke(Color.web("#4a9eff"));
+        gc.setLineWidth(1);
+        gc.strokeRoundRect(x, y, w, h, 6, 6);
+
+        gc.setFill(Color.web("#e8dcc8"));
+        gc.setFont(javafx.scene.text.Font.font("Arial", 12));
+        String title = hoveredNPC.getName() + " • " + hoveredNPC.getType().getName();
+        gc.fillText(title, x + 8, y + 18);
+
+        String action = "Status: " + hoveredNPC.getCurrentAction().name();
+        gc.setFill(Color.web("#c0c0c0"));
+        gc.setFont(javafx.scene.text.Font.font("Arial", 11));
+        gc.fillText(action, x + 8, y + 36);
+
+        if (hoveredNPC.getCarryingResources() > 0 && hoveredNPC.getCarryingResourceType() != null) {
+            String itemName = hoveredNPC.getCarryingResourceType();
+            String t = "Carrying: " + hoveredNPC.getCarryingResources() + " x " + itemName;
+            gc.fillText(t, x + 8, y + 52);
+        }
+
+        // Inventory details (up to 3 items)
+        Inventory inv = hoveredNPC.getInventory();
+        if (inv != null && !inv.isEmpty()) {
+            gc.setFont(javafx.scene.text.Font.font("Arial", 10));
+            int displayed = 0;
+            int yline = 70;
+            for (int i = 0; i < inv.getSize() && displayed < 3; i++) {
+                ItemStack s = inv.getSlot(i);
+                if (s != null && !s.isEmpty()) {
+                    String line = "- " + s.getItem().getName() + " x" + s.getQuantity();
+                    gc.fillText(line, x + 8, y + yline);
+                    yline += 14;
+                    displayed++;
+                }
+            }
+            if (inv.getUsedSlots() > 3) {
+                gc.fillText("... and " + (inv.getUsedSlots() - 3) + " more slots", x + 8, y + yline);
+            }
+        }
+        // Hint for inspecting
+        gc.setFont(javafx.scene.text.Font.font("Arial", 10));
+        gc.setFill(Color.web("#9f9f9f"));
+        gc.fillText("Press 'I' to inspect", x + w - 78, y + h - 8);
     }
     
     /**
@@ -996,13 +1118,16 @@ public class MapCanvas {
         double[] pos = gridToScreen(x, y);
         double cellSize = GRID_SIZE * zoom;
         
-        // Use professional terrain renderer at reasonable zoom levels
-        if (zoom >= 0.5 && terrainRenderer != null && !(currentFilter instanceof ResourceHeatmapFilter)) {
+        // Check if basic graphics mode is enabled
+        boolean useBasicGraphics = GameSettings.getInstance().isBasicGraphicsMode();
+        
+        // Use professional terrain renderer at reasonable zoom levels (unless basic graphics mode)
+        if (!useBasicGraphics && zoom >= 0.5 && terrainRenderer != null && !(currentFilter instanceof ResourceHeatmapFilter)) {
             TerrainType[][] terrainMap = world.getTerrain().getTerrainMap();
             TerrainType[][] neighbors = TerrainRenderer.getNeighbors(terrainMap, x, y);
             terrainRenderer.renderTile(gc, x, y, pos[0], pos[1], cellSize, terrain, neighbors);
         } else {
-            // Fallback to simple rendering at low zoom or with special filters
+            // Simple rendering: solid colors only (basic graphics mode, low zoom, or special filters)
             Color terrainColor;
             if (currentFilter instanceof ResourceHeatmapFilter) {
                 terrainColor = ((ResourceHeatmapFilter) currentFilter).getCellColor(x, y);
@@ -1035,8 +1160,8 @@ public class MapCanvas {
             gc.setLineWidth(0.5);
             gc.strokeRect(pos[0], pos[1], cellSize, cellSize);
             
-            // Draw grid IDs if enabled
-            if (showGridNumbers && zoom > 0.8) {
+            // Draw grid IDs if enabled in settings
+            if (GameSettings.getInstance().isShowGridNumbers() && zoom > 0.8) {
                 gc.setFill(Color.color(1, 1, 1, 0.7));
                 gc.setFont(new Font("Arial", Math.max(8, 10 * zoom)));
                 gc.fillText(String.valueOf(y * world.getMapWidth() + x), pos[0] + 4, pos[1] + 14);
@@ -1096,7 +1221,14 @@ public class MapCanvas {
      * Renders all resource nodes (farmland, lumber, quarry, fishery, ore).
      */
     private void renderAllResourceNodes(double width, double height) {
-        // Only render at reasonable zoom levels
+        // If zoomed out and large-resource mode is enabled, render aggregated icons
+        if (zoom < LARGE_ICON_ZOOM_THRESHOLD) {
+            if (showLargeResourceIcons) {
+                renderLargeResourceIcons(width, height);
+            }
+            return;
+        }
+        // Only render at reasonable zoom levels for normal node sprites
         if (zoom < 0.3) return;
         
         // Render old-style resource nodes (terrain-based)
@@ -1141,6 +1273,85 @@ public class MapCanvas {
         }
     }
     
+    
+    /**
+     * Renders aggregated large resource icons for low-zoom overview when heatmap is active.
+     */
+    private void renderLargeResourceIcons(double width, double height) {
+        int blockSize = 18; // group tiles into blocks for clustering
+        Map<Long, Map<String, Integer>> bucketCounts = new HashMap<>();
+
+        for (ResourceNodeBase node : world.getAllResourceNodes()) {
+            int bx = (int) node.getWorldX() / blockSize;
+            int by = (int) node.getWorldY() / blockSize;
+            long key = ((long) bx << 32) | (by & 0xffffffffL);
+            Map<String, Integer> counts = bucketCounts.computeIfAbsent(key, k -> new HashMap<>());
+            String cat = node.getResourceCategory();
+            counts.put(cat, counts.getOrDefault(cat, 0) + 1);
+        }
+
+        // Also include farmland nodes as 'Fertility' counts
+        for (FarmlandNode farm : world.getFarmlandNodes()) {
+            int bx = (int) farm.getWorldX() / blockSize;
+            int by = (int) farm.getWorldY() / blockSize;
+            long key = ((long) bx << 32) | (by & 0xffffffffL);
+            Map<String, Integer> counts = bucketCounts.computeIfAbsent(key, k -> new HashMap<>());
+            counts.put("Fertility", counts.getOrDefault("Fertility", 0) + 1);
+        }
+
+        // Draw one icon per non-empty bucket
+        for (Map.Entry<Long, Map<String, Integer>> entry : bucketCounts.entrySet()) {
+            long key = entry.getKey();
+            int bx = (int) (key >> 32);
+            int by = (int) key;
+
+            int centerX = bx * blockSize + blockSize / 2;
+            int centerY = by * blockSize + blockSize / 2;
+            double[] screen = gridToScreen(centerX, centerY);
+
+            // Skip if off screen
+            if (screen[0] < -100 || screen[0] > width + 100 || screen[1] < -100 || screen[1] > height + 100) continue;
+
+            Map<String, Integer> counts = entry.getValue();
+            Map.Entry<String, Integer> top = counts.entrySet().stream()
+                .max(Comparator.comparingInt(Map.Entry::getValue)).orElse(null);
+            if (top == null) continue;
+
+            String category = top.getKey();
+            int count = top.getValue();
+
+            String icon = getCategoryIcon(category);
+            double iconSize = Math.max(14, 18 + Math.log(count + 1) * 8);
+
+            gc.setFont(new Font("Segoe UI Emoji", iconSize));
+            gc.setFill(Color.web("#ffffff"));
+            gc.fillText(icon, screen[0] - iconSize / 2, screen[1] + iconSize / 2);
+
+            // Small count badge
+            double badgeSize = 12;
+            gc.setFill(Color.web("#222222", 0.8));
+            gc.fillOval(screen[0] + iconSize / 2 - badgeSize / 2, screen[1] - iconSize / 2, badgeSize, badgeSize);
+            gc.setFill(Color.web("#ffffff"));
+            gc.setFont(new Font("Arial", 10));
+            gc.fillText(String.valueOf(count), screen[0] + iconSize / 2 - badgeSize / 2 + 3, screen[1] - iconSize / 2 + 9);
+        }
+    }
+
+    /**
+     * Returns a simple emoji/string icon for a resource category.
+     */
+    private String getCategoryIcon(String category) {
+        return switch (category.toLowerCase()) {
+            case "ore" -> "⛏";
+            case "stone" -> "🪨";
+            case "gem" -> "💎";
+            case "wood" -> "🌲";
+            case "fertility","grain","farm","farmland" -> "🌾";
+            case "fish" -> "🐟";
+            default -> "⚑";
+        };
+    }
+
     private void renderRoads(double width, double height) {
         RoadNetwork roadNetwork = world.getRoadNetwork();
         
@@ -1172,7 +1383,7 @@ public class MapCanvas {
                     double perpY = dx / len * offset;
                     
                     gc.setStroke(roadColor);
-                    gc.setLineWidth(Math.max(1.0, roadWidth / 2));
+                    gc.setLineWidth(Math.max(1.5, roadWidth / 2));
                     gc.strokeLine(cx1 + perpX, cy1 + perpY, cx2 + perpX, cy2 + perpY);
                     gc.strokeLine(cx1 - perpX, cy1 - perpY, cx2 - perpX, cy2 - perpY);
                 }
@@ -1468,26 +1679,63 @@ public class MapCanvas {
     
     /**
      * Renders a tinted overlay based on time of day.
+     * At night, the map gets very dark with only the player area lit.
      */
     private void renderDayNightOverlay(double width, double height) {
         if (gameTime == null) return;
         
         Color skyTint = gameTime.getSkyTint();
+        GameTime.TimeOfDay timeOfDay = gameTime.getTimeOfDay();
         
-        // Apply subtle tint over the entire map
-        // The tint is semi-transparent to maintain visibility
-        double opacity = 0.15; // Subtle effect
+        // Base opacity based on time of day
+        double opacity = 0.15; // Subtle effect during day
         
-        // Night is darker
-        if (gameTime.getTimeOfDay() == GameTime.TimeOfDay.NIGHT) {
+        if (timeOfDay == GameTime.TimeOfDay.NIGHT) {
+            opacity = 0.75; // Very dark at night
+        } else if (timeOfDay == GameTime.TimeOfDay.DUSK) {
+            opacity = 0.45;
+        } else if (timeOfDay == GameTime.TimeOfDay.DAWN) {
             opacity = 0.35;
-        } else if (gameTime.getTimeOfDay() == GameTime.TimeOfDay.DUSK ||
-                   gameTime.getTimeOfDay() == GameTime.TimeOfDay.DAWN) {
-            opacity = 0.2;
         }
         
-        gc.setFill(skyTint.deriveColor(0, 1, 1, opacity));
-        gc.fillRect(0, 0, width, height);
+        // At night, create darkness with a lit area around the player
+        if (timeOfDay == GameTime.TimeOfDay.NIGHT && player != null) {
+            // Get player screen position
+            double playerScreenX = player.getGridX() * GRID_SIZE * zoom + offsetX;
+            double playerScreenY = player.getGridY() * GRID_SIZE * zoom + offsetY;
+            
+            // Create radial gradient for light around player
+            double lightRadius = GRID_SIZE * zoom * 6; // 6 tile radius of light
+            
+            // First draw the full darkness overlay
+            gc.setFill(Color.BLACK.deriveColor(0, 1, 1, opacity));
+            gc.fillRect(0, 0, width, height);
+            
+            // Then cut out a soft circle of light around player
+            // Using a radial clear effect
+            gc.save();
+            gc.setGlobalBlendMode(javafx.scene.effect.BlendMode.MULTIPLY);
+            
+            // Draw concentric circles of decreasing darkness
+            for (int i = 6; i >= 0; i--) {
+                double radius = lightRadius * (i / 6.0);
+                double circleDarkness = 1.0 - (i / 6.0) * 0.9; // Center is brightest
+                gc.setFill(Color.color(1, 1, 1, circleDarkness));
+                gc.fillOval(playerScreenX - radius, playerScreenY - radius, radius * 2, radius * 2);
+            }
+            
+            gc.restore();
+            
+            // Add torch-like flicker effect with subtle color
+            gc.setFill(Color.web("#ffcc66").deriveColor(0, 1, 1, 0.05 + Math.random() * 0.02));
+            double flickerRadius = lightRadius * 0.5;
+            gc.fillOval(playerScreenX - flickerRadius, playerScreenY - flickerRadius, 
+                       flickerRadius * 2, flickerRadius * 2);
+        } else {
+            // Regular tint for day/dusk/dawn
+            gc.setFill(skyTint.deriveColor(0, 1, 1, opacity));
+            gc.fillRect(0, 0, width, height);
+        }
     }
     
     /**
@@ -1750,6 +1998,30 @@ public class MapCanvas {
         gc.setFill(TEXT_COLOR);
         gc.setFont(new Font("Arial", 12));
         gc.fillText(info, 10, 20);
+
+        // Draw a small compass showing cardinal directions (N at top)
+        double cx = width - 40;
+        double cy = 22;
+        double r = 18;
+        gc.setFill(Color.web("#1f1a10"));
+        gc.fillOval(cx - r, cy - r, r * 2, r * 2);
+        gc.setStroke(Color.web("#c4a574"));
+        gc.setLineWidth(1);
+        gc.strokeOval(cx - r, cy - r, r * 2, r * 2);
+
+        // Direction letters
+        gc.setFill(Color.web("#e0e0e0"));
+        gc.setFont(new Font("Arial", 9));
+        gc.fillText("N", cx - 3, cy - r + 10);
+        gc.fillText("E", cx + r - 8, cy + 3);
+        gc.fillText("S", cx - 3, cy + r - 2);
+        gc.fillText("W", cx - r + 4, cy + 3);
+
+        // Arrow pointing to North (upwards)
+        gc.setFill(Color.web("#ffd700"));
+        double[] ax = {cx, cx - 5, cx + 5};
+        double[] ay = {cy - r + 6, cy - r + 14, cy - r + 14};
+        gc.fillPolygon(ax, ay, 3);
     }
     
     // ==================== Coordinate Conversion ====================
@@ -1790,6 +2062,13 @@ public class MapCanvas {
         this.currentFilter = filter;
         render();
     }
+
+    /**
+     * Gets the NPCManager instance owned by this map canvas.
+     */
+    public NPCManager getNPCManager() {
+        return npcManager;
+    }
     
     public void setGridBrightness(double factor) {
         this.gridBrightness = clamp(factor, 0.3, 2.0);
@@ -1797,7 +2076,8 @@ public class MapCanvas {
     }
     
     public void toggleGridNumbers() {
-        this.showGridNumbers = !this.showGridNumbers;
+        GameSettings settings = GameSettings.getInstance();
+        settings.setShowGridNumbers(!settings.isShowGridNumbers());
         render();
     }
     

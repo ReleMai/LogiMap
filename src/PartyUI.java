@@ -217,7 +217,9 @@ public class PartyUI extends VBox {
         nameLabel.setTextFill(Color.web(TEXT));
         nameLabel.setFont(Font.font("Georgia", FontWeight.BOLD, 11));
         
-        Label roleLabel = new Label(member.getRole().getIcon() + " " + member.getRole().getName() + " Lv." + member.getLevel());
+        // Show profession name (e.g., "Blacksmith") with role icon (e.g., "🔨 Laborer")
+        String profDisplay = member.getRole().getIcon() + " " + member.getProfessionName() + " Lv." + member.getLevel();
+        Label roleLabel = new Label(profDisplay);
         roleLabel.setTextFill(Color.web(TEXT_DIM));
         roleLabel.setFont(Font.font("Georgia", 9));
         
@@ -264,7 +266,12 @@ public class PartyUI extends VBox {
         nameLabel.setTextFill(Color.web(GOLD));
         nameLabel.setFont(Font.font("Georgia", FontWeight.BOLD, 14));
         
-        Label roleLabel = new Label(member.getRole().getIcon() + " " + member.getRole().getName());
+        // Show profession name with role info
+        String roleDisplay = member.getRole().getIcon() + " " + member.getProfessionName();
+        if (!member.getProfessionName().equals(member.getRole().getName())) {
+            roleDisplay += " (" + member.getRole().getName() + ")";
+        }
+        Label roleLabel = new Label(roleDisplay);
         roleLabel.setTextFill(Color.web(TEXT));
         roleLabel.setFont(Font.font("Georgia", 11));
         

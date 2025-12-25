@@ -367,15 +367,17 @@ public class FarmlandNode {
     }
     
     /**
-     * Updates growth state over time.
+     * Updates growth state over time and respects GameTime speed multiplier.
      */
-    public void update() {
+    public void update(GameTime gameTime) {
+        double multiplier = gameTime != null ? gameTime.getTimeMultiplier() : 1.0;
+
         // Regrow after harvest
         if (growthStage == GrowthStage.GROWING && !isHarvestable) {
-            long elapsed = System.currentTimeMillis() - lastHarvestTime;
+            long elapsed = (long)((System.currentTimeMillis() - lastHarvestTime) * multiplier);
             if (elapsed >= regrowthTimeMs) {
                 growthStage = GrowthStage.MATURE;
-                
+
                 // 50% chance to be fully ripe
                 if (Math.random() < 0.5) {
                     growthStage = GrowthStage.RIPE;
@@ -383,27 +385,29 @@ public class FarmlandNode {
                 isHarvestable = true;
             }
         }
-        
+
         // Harvested fields slowly restore (respawn)
         if (growthStage == GrowthStage.HARVESTED) {
-            long elapsed = System.currentTimeMillis() - lastHarvestTime;
+            long elapsed = (long)((System.currentTimeMillis() - lastHarvestTime) * multiplier);
             if (elapsed >= regrowthTimeMs * 3) {
                 // Field regrows
                 harvestsRemaining = maxHarvests;
                 growthStage = GrowthStage.SPROUTS;
             }
         }
-        
+
         // Sprouts grow over time
         if (growthStage == GrowthStage.SPROUTS) {
-            long elapsed = System.currentTimeMillis() - lastHarvestTime;
+            long elapsed = (long)((System.currentTimeMillis() - lastHarvestTime) * multiplier);
             if (elapsed >= regrowthTimeMs * 4) {
                 growthStage = GrowthStage.MATURE;
                 isHarvestable = true;
             }
         }
     }
-    
+
+    @Deprecated
+    public void update() { update(null); }
     /**
      * Checks if a point is within this farmland's bounds.
      */
@@ -426,6 +430,19 @@ public class FarmlandNode {
     public boolean isHarvestable() { return isHarvestable && growthStage.canHarvest(); }
     public int getHarvestsRemaining() { return harvestsRemaining; }
     public Town getParentVillage() { return parentVillage; }
+    
+    /**
+     * Gets estimated yield for display purposes (without randomness variation).
+     */
+    public int getEstimatedYield() {
+        int baseYield = plotWidth * plotHeight / 3;
+        if (growthStage == GrowthStage.RIPE) {
+            baseYield = (int)(baseYield * 1.5);
+        } else if (growthStage == GrowthStage.MATURE) {
+            baseYield = (int)(baseYield * 1.0);
+        }
+        return Math.max(1, baseYield);
+    }
     
     /**
      * Gets info for tooltip display.

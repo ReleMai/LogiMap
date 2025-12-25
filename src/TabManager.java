@@ -19,11 +19,11 @@ public class TabManager {
     private static final String TEXT_COLOR = "#e0e0e0";
     
     private static final String[] TAB_NAMES = {
-        "Map", "Region"
+        "Map", "Region", "Social"
     };
     
     private static final String[] TAB_ICONS = {
-        "🗺", "🌍"
+        "🗺", "🌍", "👥"
     };
     
     public TabManager(LogiMapUI parentUI) {

@@ -85,6 +85,7 @@ public class GameSettings {
     // New graphics/gameplay settings
     private boolean basicGraphicsMode = false; // Simple textures, no decorations, no animations
     private boolean showGrid = true;           // Show map grid
+    private boolean showGridNumbers = false;   // Show grid tile numbers/IDs
     private boolean instantTownMenu = false;   // Skip guard conversation, open town menu directly
     private double gameSpeed = 1.0;            // Game speed multiplier (0.5x, 1.0x, 2.0x, 4.0x)
     private boolean teleportCheatEnabled = false; // Allow ctrl+click teleport cheat
@@ -124,6 +125,7 @@ public class GameSettings {
     public boolean isMoveToInteract() { return moveToInteract; }
     public boolean isBasicGraphicsMode() { return basicGraphicsMode; }
     public boolean isShowGrid() { return showGrid; }
+    public boolean isShowGridNumbers() { return showGridNumbers; }
     public boolean isInstantTownMenu() { return instantTownMenu; }
     public double getGameSpeed() { return gameSpeed; }
     public boolean isTeleportCheatEnabled() { return teleportCheatEnabled; }
@@ -192,6 +194,11 @@ public class GameSettings {
     
     public void setShowGrid(boolean showGrid) {
         this.showGrid = showGrid;
+        notifyChanged();
+    }
+    
+    public void setShowGridNumbers(boolean showGridNumbers) {
+        this.showGridNumbers = showGridNumbers;
         notifyChanged();
     }
     
@@ -274,6 +281,7 @@ public class GameSettings {
         props.setProperty("moveToInteract", String.valueOf(moveToInteract));
         props.setProperty("basicGraphicsMode", String.valueOf(basicGraphicsMode));
         props.setProperty("showGrid", String.valueOf(showGrid));
+        props.setProperty("showGridNumbers", String.valueOf(showGridNumbers));
         props.setProperty("instantTownMenu", String.valueOf(instantTownMenu));
         props.setProperty("gameSpeed", String.valueOf(gameSpeed));
         props.setProperty("teleportCheatEnabled", String.valueOf(teleportCheatEnabled));
@@ -308,6 +316,7 @@ public class GameSettings {
             moveToInteract = Boolean.parseBoolean(props.getProperty("moveToInteract", "true"));
             basicGraphicsMode = Boolean.parseBoolean(props.getProperty("basicGraphicsMode", "false"));
             showGrid = Boolean.parseBoolean(props.getProperty("showGrid", "true"));
+            showGridNumbers = Boolean.parseBoolean(props.getProperty("showGridNumbers", "false"));
             instantTownMenu = Boolean.parseBoolean(props.getProperty("instantTownMenu", "false"));
             gameSpeed = Double.parseDouble(props.getProperty("gameSpeed", "1.0"));
             teleportCheatEnabled = Boolean.parseBoolean(props.getProperty("teleportCheatEnabled", "false"));
@@ -334,6 +343,7 @@ public class GameSettings {
         moveToInteract = true;
         basicGraphicsMode = false;
         showGrid = true;
+        showGridNumbers = false;
         instantTownMenu = false;
         gameSpeed = SPEED_NORMAL;
         teleportCheatEnabled = false;

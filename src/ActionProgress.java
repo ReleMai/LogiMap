@@ -111,6 +111,7 @@ public class ActionProgress {
     public void startAction(String name, Runnable onComplete) {
         startAction(name, 30, onComplete, null);
     }
+
     
     /**
      * Updates the action progress based on elapsed game time.
@@ -166,9 +167,15 @@ public class ActionProgress {
      * Resets the progress state.
      */
     private void reset() {
-        // Restore original time speed
+        // Restore original time speed only if we still own the gathering multiplier.
+        // If the player changed the speed during the action, preserve their choice.
         if (gameTime != null) {
-            gameTime.setTimeMultiplier(previousTimeMultiplier);
+            if (Math.abs(gameTime.getTimeMultiplier() - GATHERING_TIME_MULTIPLIER) < 0.01) {
+                gameTime.setTimeMultiplier(previousTimeMultiplier);
+            } else {
+                // Player modified the time while gathering; do not override.
+                System.out.println("ActionProgress: player changed time multiplier during action; leaving it at " + gameTime.getTimeMultiplier());
+            }
         }
         
         // Unlock player movement

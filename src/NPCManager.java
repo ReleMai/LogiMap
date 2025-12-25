@@ -12,25 +12,34 @@ import javafx.scene.text.Text;
 /**
  * Manages NPCs across all towns in the world.
  * Handles spawning, updating, and rendering of NPCs.
+ * Uses role-based population system for villages and cities.
  */
 public class NPCManager {
     
     // NPC storage by town
     private Map<Town, List<NPC>> npcsByTown;
+    private Map<Town, SettlementPopulation> populations;
     private List<NPC> roamingNPCs;
     private List<NPCParty> parties;
     
-    // Configuration
+    // Reference to game time for schedule updates
+    private GameTime gameTime;
+    
+    // Reference to road network for NPC travel speed
+    private RoadNetwork roadNetwork;
+    
+    // Current hour cache for schedule checks
+    private int lastCheckedHour = -1;
+    
+    // Configuration constants
     private static final int MIN_NPCS_VILLAGE = 3;
     private static final int MAX_NPCS_VILLAGE = 6;
     private static final int MIN_NPCS_CITY = 8;
     private static final int MAX_NPCS_CITY = 15;
+    private static final double PARTY_FORMATION_CHANCE = 0.8;
+    private static final int MIN_PARTIES = 2;
     
-    // Party formation chance for roaming NPCs
-    private static final double PARTY_FORMATION_CHANCE = 0.8; // 80% chance roamers form parties
-    private static final int MIN_PARTIES = 2; // Minimum parties to spawn
-    
-    // NPC type weights for villages and cities
+    // NPC type weights for extra NPCs beyond role-based ones
     private static final Map<NPC.NPCType, Integer> VILLAGE_WEIGHTS = Map.of(
         NPC.NPCType.VILLAGER, 40,
         NPC.NPCType.PEASANT, 30,
@@ -53,12 +62,42 @@ public class NPCManager {
     );
     
     private Random random;
+    private EconomySystem economySystem = null;
     
     public NPCManager() {
         npcsByTown = new HashMap<>();
+        populations = new HashMap<>();
         roamingNPCs = new ArrayList<>();
         parties = new ArrayList<>();
         random = new Random();
+    }
+
+    public void setEconomySystem(EconomySystem economy) {
+        this.economySystem = economy;
+    }
+
+    /**
+     * Gets the SettlementPopulation object for a town if available.
+     */
+    public SettlementPopulation getPopulationForTown(Town town) {
+        return populations.get(town);
+    }
+    
+    public void setGameTime(GameTime gameTime) {
+        this.gameTime = gameTime;
+    }
+    
+    public void setRoadNetwork(RoadNetwork network) {
+        this.roadNetwork = network;
+        // Update all existing NPCs with road network
+        for (List<NPC> npcs : npcsByTown.values()) {
+            for (NPC npc : npcs) {
+                npc.setRoadNetwork(network);
+            }
+        }
+        for (NPC npc : roamingNPCs) {
+            npc.setRoadNetwork(network);
+        }
     }
 
     /**
@@ -125,42 +164,207 @@ public class NPCManager {
 
     /**
      * Populates all towns in the list with resident NPCs.
+     * Uses the role-based SettlementPopulation system.
      */
     public void populateAllTowns(List<Town> towns) {
         if (towns == null) return;
         for (Town town : towns) {
             populateTown(town);
         }
+        
+        // Assign city ownership of nearby villages
+        assignCityVillageOwnership(towns);
     }
     
     /**
-     * Populates a town with NPCs based on its size.
+     * Populates a town with NPCs using the role-based system.
+     * Villages get: 1 Elder, 1 Transporter, 2 Peasants (4 total)
+     * Cities get: 1 Mayor, 4 Guards, 3 Transporters, 2 Tax Collectors (10 total)
      */
     public void populateTown(Town town) {
         if (npcsByTown.containsKey(town)) {
             return; // Already populated
         }
         
-        List<NPC> npcs = new ArrayList<>();
-        boolean isCity = town.isMajor();
+        // Create settlement population manager
+        SettlementPopulation population = new SettlementPopulation(town);
+        List<NPC> npcs = population.spawnInitialPopulation();
         
-        // Determine NPC count
-        int minNpcs = isCity ? MIN_NPCS_CITY : MIN_NPCS_VILLAGE;
-        int maxNpcs = isCity ? MAX_NPCS_CITY : MAX_NPCS_VILLAGE;
-        int npcCount = minNpcs + random.nextInt(maxNpcs - minNpcs + 1);
-        
-        // Spawn NPCs
-        for (int i = 0; i < npcCount; i++) {
-            NPC.NPCType type = selectNPCType(isCity);
-            NPC npc = NPC.createRandom(type, town);
-            
-            // Vary wander radius based on town size
-            npc.setWanderRadius(isCity ? 2.5 : 1.5);
-            
-            npcs.add(npc);
+        // Set road network reference for all NPCs
+        if (roadNetwork != null) {
+            for (NPC npc : npcs) {
+                npc.setRoadNetwork(roadNetwork);
+            }
         }
         
+        // If we have an economy system, register the town and ensure supply/demand exist
+        if (economySystem != null) {
+            economySystem.registerTown(town);
+        }
+
+        // Store references
+        populations.put(town, population);
         npcsByTown.put(town, npcs);
+
+        // Let each NPC know its manager for callbacks
+        for (NPC npc : npcs) {
+            npc.setManager(this);
+        }
+        
+        System.out.println("Populated " + town.getName() + " with " + npcs.size() + " NPCs" +
+            (town.isMajor() ? " (City)" : " (Village)"));
+    }
+    
+    /**
+     * Assigns villages to nearby cities for taxation.
+     */
+    private void assignCityVillageOwnership(List<Town> towns) {
+        List<Town> cities = new ArrayList<>();
+        List<Town> villages = new ArrayList<>();
+        
+        for (Town town : towns) {
+            if (town.isMajor()) {
+                cities.add(town);
+            } else {
+                villages.add(town);
+            }
+        }
+        
+        // Assign each village to nearest city
+        for (Town village : villages) {
+            Town nearestCity = null;
+            double nearestDist = Double.MAX_VALUE;
+            
+            for (Town city : cities) {
+                double dx = city.getGridX() - village.getGridX();
+                double dy = city.getGridY() - village.getGridY();
+                double dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearestCity = city;
+                }
+            }
+            
+            if (nearestCity != null && nearestDist < 100) { // Within 100 tiles
+                SettlementPopulation cityPop = populations.get(nearestCity);
+                SettlementPopulation villagePop = populations.get(village);
+                
+                if (cityPop != null && villagePop != null) {
+                    cityPop.addOwnedVillage(village);
+                    villagePop.setParentCity(nearestCity);
+                    
+                    // Assign tax collectors to this village
+                    assignTaxCollectorRoute(nearestCity, village);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Assigns a tax collector from the city to visit the village.
+     */
+    private void assignTaxCollectorRoute(Town city, Town village) {
+        List<NPC> cityNPCs = npcsByTown.get(city);
+        if (cityNPCs == null) return;
+        
+        for (NPC npc : cityNPCs) {
+            if (npc.getRole() == NPCRole.TAX_COLLECTOR && npc.getAssignedDestination() == null) {
+                npc.setAssignedDestination(village);
+                break;
+            }
+        }
+    }
+    
+    // Reference to world for job site lookups
+    private Object worldRef = null;
+    
+    public void setWorldReference(Object world) {
+        this.worldRef = world;
+    }
+    
+    /**
+     * Assigns jobs to NPCs in villages based on village type.
+     * Should be called after world generation.
+     */
+    public void assignVillagerJobs() {
+        for (Map.Entry<Town, List<NPC>> entry : npcsByTown.entrySet()) {
+            Town town = entry.getKey();
+            
+            // Only assign jobs to village NPCs, not city NPCs
+            if (town.isMajor()) continue;
+            
+            List<NPC> npcs = entry.getValue();
+            VillageType villageType = town.getVillageType();
+            if (villageType == null) continue;
+            
+            // Assign jobs to some NPCs (not all - some should wander)
+            int workersNeeded = Math.max(1, npcs.size() / 2);
+            int assigned = 0;
+            
+            for (NPC npc : npcs) {
+                if (assigned >= workersNeeded) break;
+                
+                // Only peasants and villagers get resource jobs
+                if (npc.getType() != NPC.NPCType.PEASANT && 
+                    npc.getType() != NPC.NPCType.VILLAGER) continue;
+                
+                // Get job site location (around the village)
+                double angle = random.nextDouble() * Math.PI * 2;
+                double distance = 4 + random.nextDouble() * 6; // 4-10 tiles from center
+                double siteX = town.getGridX() + town.getSize() / 2.0 + Math.cos(angle) * distance;
+                double siteY = town.getGridY() + town.getSize() / 2.0 + Math.sin(angle) * distance;
+                
+                NPCJob.JobType jobType = npc.getPreferredJobType();
+                NPCJob job = new NPCJob(jobType, siteX, siteY, town);
+                npc.assignJob(job);
+                assigned++;
+            }
+        }
+    }
+    
+    /**
+     * Reassigns jobs to NPCs that have completed their jobs.
+     * Call this periodically during game update.
+     */
+    public void reassignCompletedJobs() {
+        for (Map.Entry<Town, List<NPC>> entry : npcsByTown.entrySet()) {
+            Town town = entry.getKey();
+            if (town.isMajor()) continue;
+            
+            for (NPC npc : entry.getValue()) {
+                // Skip if NPC has an active job
+                if (npc.hasJob()) continue;
+                
+                // Only reassign to worker types
+                if (npc.getType() != NPC.NPCType.PEASANT && 
+                    npc.getType() != NPC.NPCType.VILLAGER) continue;
+                
+                // 30% chance to start a new job each check
+                if (random.nextDouble() < 0.3) {
+                    double angle = random.nextDouble() * Math.PI * 2;
+                    double distance = 4 + random.nextDouble() * 6;
+                    double siteX = town.getGridX() + town.getSize() / 2.0 + Math.cos(angle) * distance;
+                    double siteY = town.getGridY() + town.getSize() / 2.0 + Math.sin(angle) * distance;
+                    
+                    NPCJob.JobType jobType = npc.getPreferredJobType();
+                    // Find nearest major town (city) for selling exports; fallback to home town if none
+                    Town nearestMajor = null;
+                    double bestDist = Double.MAX_VALUE;
+                    for (Town t2 : populations.keySet()) {
+                        if (!t2.isMajor() || t2.equals(town)) continue;
+                        double dx = t2.getGridX() - town.getGridX();
+                        double dy = t2.getGridY() - town.getGridY();
+                        double d = Math.sqrt(dx * dx + dy * dy);
+                        if (d < bestDist) { bestDist = d; nearestMajor = t2; }
+                    }
+
+                    Town deliveryTown = nearestMajor != null ? nearestMajor : town;
+                    NPCJob job = new NPCJob(jobType, siteX, siteY, deliveryTown);
+                    npc.assignJob(job);
+                }
+            }
+        }
     }
     
     /**
@@ -186,6 +390,10 @@ public class NPCManager {
     /**
      * Updates all NPCs near the given world position.
      */
+    // Accumulator for job reassignment (don't check every frame)
+    private double jobReassignTimer = 0;
+    private static final double JOB_REASSIGN_INTERVAL = 5.0; // Check every 5 seconds
+    
     public void update(double deltaTime, double playerX, double playerY, double viewRadius, List<Town> allTowns) {
         for (Map.Entry<Town, List<NPC>> entry : npcsByTown.entrySet()) {
             Town town = entry.getKey();
@@ -211,8 +419,107 @@ public class NPCManager {
         for (NPCParty party : parties) {
             party.update(deltaTime, allTowns);
         }
+        
+        // Periodically reassign jobs to idle NPCs
+        jobReassignTimer += deltaTime;
+        if (jobReassignTimer >= JOB_REASSIGN_INTERVAL) {
+            jobReassignTimer = 0;
+            reassignCompletedJobs();
+        }
     }
-    
+
+    /**
+     * Handles an NPC delivering gathered resources back to their town.
+     * Splits the goods: half stored (if warehouse exists), half sold into town income via EconomySystem.
+     */
+    // Handles an NPC delivering gathered resources. deliveryTown may be null (will fallback to npc's homeTown)
+    public void handleNPCDelivery(NPC npc, String resourceType, int quantity, Town deliveryTown) {
+        if (npc == null || resourceType == null || quantity <= 0) return;
+        Town town = deliveryTown != null ? deliveryTown : npc.getHomeTown();
+        if (town == null) return;
+
+        // Map to item ID
+        String itemId = mapResourceTypeToItemId(resourceType);
+        if (itemId == null) itemId = "stone_common";
+
+        int toStorage = quantity / 2;
+        int toSell = quantity - toStorage;
+
+        // If the town produces this resource, don't sell it there — store it all instead
+        String townSpecific = town.getSpecificResourceId();
+        if (townSpecific != null && townSpecific.equals(itemId)) {
+            // All goes to storage / town supply
+            toStorage = quantity;
+            toSell = 0;
+            System.out.println("NPC sale blocked at " + town.getName() + ": town produces " + itemId + " — storing instead.");
+        }
+
+        // Store half in warehouse if available
+        TownWarehouse wh = town.getWarehouse();
+        if (toStorage > 0) {
+            if (wh != null && wh.isPurchased() && wh.getStorage() != null) {
+                ItemStack stack = ItemRegistry.createStack(itemId, toStorage);
+                if (stack != null) {
+                    wh.getStorage().addItem(stack);
+                }
+            } else {
+                // Add to town supply directly if no warehouse
+                if (economySystem != null) economySystem.addSupplyToTown(town, itemId, toStorage);
+            }
+        }
+
+        // Sell the rest - behavior differs if selling at another (major) town
+        if (toSell > 0 && economySystem != null) {
+            int unitPrice = economySystem.getBuyPrice(town, itemId); // price town is willing to pay
+            int revenue = unitPrice * toSell;
+
+            // If selling at a major town (city) and NPC's home town is different, NPC carries revenue back to origin
+            Town origin = npc.getHomeTown();
+            SettlementPopulation destPop = populations.get(town);
+
+            if (town.isMajor() && origin != null && !origin.equals(town)) {
+                // NPC will carry gold back to origin and the city receives the supply
+                npc.addCarryingGold(revenue);
+                System.out.println(npc.getName() + " sold " + toSell + " " + itemId + " at " + town.getName() + " and will carry " + revenue + " gold back to " + origin.getName());
+                // City supply increases
+                economySystem.addSupplyToTown(town, itemId, toSell);
+
+                // Assign NPC a return job to their origin so they bring back and deposit the gold
+                double ox = origin.getGridX() + origin.getSize() / 2.0;
+                double oy = origin.getGridY() + origin.getSize() / 2.0;
+                NPCJob returnJob = new NPCJob(NPCJob.JobType.DELIVER_GOODS, ox, oy, origin);
+                npc.assignJob(returnJob);
+            } else {
+                // Local sell: add revenue to destination
+                if (destPop != null) destPop.addIncome(revenue);
+                economySystem.addSupplyToTown(town, itemId, toSell);
+            }
+
+            // If NPC is carrying gold and has returned to its home town, deposit it into the home vault
+            if (npc.getCarryingGold() > 0 && npc.getHomeTown() != null && npc.getHomeTown().equals(town)) {
+                SettlementPopulation homePop = populations.get(town);
+                if (homePop != null) {
+                    homePop.addGold(npc.getCarryingGold());
+                    System.out.println(npc.getName() + " deposited " + npc.getCarryingGold() + " gold into " + town.getName() + "'s vault.");
+                }
+                npc.setCarryingGold(0);
+            }
+        }
+    }
+
+    // Map resource type strings to item IDs
+    private String mapResourceTypeToItemId(String resourceType) {
+        if (resourceType == null) return null;
+        switch (resourceType) {
+            case "ore": return "ore_iron";
+            case "crops":
+            case "grain": return "grain_wheat";
+            case "fish": return "fish_common";
+            case "livestock": return "meat_mutton";
+            default: return null;
+        }
+    }
+
     /**
      * Renders all NPCs within the visible area.
      * Uses proper world-to-screen coordinate transformation.
@@ -303,34 +610,48 @@ public class NPCManager {
     
     /**
      * Gets NPCs at a specific world position (for interaction).
+     * Uses tight hitboxes and returns the closest matching NPC.
      * Also checks for NPC parties.
      */
     public NPC getNPCAt(double worldX, double worldY, double radius) {
+        NPC closest = null;
+        double closestDistance = Double.MAX_VALUE;
+        
         // Check parties first (they're rendered on top)
         for (NPCParty party : parties) {
             double dx = party.getWorldX() - worldX;
             double dy = party.getWorldY() - worldY;
-            if (Math.sqrt(dx * dx + dy * dy) <= radius && party.getLeader() != null) {
-                return party.getLeader(); // Return leader for interaction
+            double dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= radius && party.getLeader() != null && dist < closestDistance) {
+                closest = party.getLeader();
+                closestDistance = dist;
             }
         }
         
-        // Check town NPCs
+        // Check town NPCs - find the closest one
         for (List<NPC> npcs : npcsByTown.values()) {
             for (NPC npc : npcs) {
-                if (npc.isNear(worldX, worldY, radius) && npc.canInteract()) {
-                    return npc;
+                if (npc.canInteract()) {
+                    double dist = npc.getDistanceTo(worldX, worldY);
+                    if (dist <= radius && dist < closestDistance) {
+                        closest = npc;
+                        closestDistance = dist;
+                    }
                 }
             }
         }
         
         // Check solo roaming NPCs
         for (NPC npc : roamingNPCs) {
-            if (npc.isNear(worldX, worldY, radius) && npc.canInteract()) {
-                return npc;
+            if (npc.canInteract()) {
+                double dist = npc.getDistanceTo(worldX, worldY);
+                if (dist <= radius && dist < closestDistance) {
+                    closest = npc;
+                    closestDistance = dist;
+                }
             }
         }
-        return null;
+        return closest;
     }
     
     /**

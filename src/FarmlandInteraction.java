@@ -6,10 +6,12 @@ import javafx.scene.text.FontWeight;
 /**
  * Interaction menu for farmland nodes.
  * Shows when player right-clicks on harvestable farmland.
+ * 
+ * Style unified with ResourceInteraction for consistent look across all resource types.
  */
 public class FarmlandInteraction {
     
-    // Medieval theme colors
+    // Medieval theme colors (unified with ResourceInteraction)
     private static final Color BG_DARK = Color.web("#1a1208");
     private static final Color BG_MED = Color.web("#2a1f10");
     private static final Color BORDER = Color.web("#c4a574");
@@ -19,11 +21,11 @@ public class FarmlandInteraction {
     private static final Color BUTTON_HOVER = Color.web("#4a3a25");
     private static final Color BUTTON_DISABLED = Color.web("#2a2010");
     
-    // Menu state
+    // Menu state (unified dimensions with ResourceInteraction)
     private boolean visible = false;
     private double menuX, menuY;
     private double menuWidth = 280;
-    private double menuHeight = 200;
+    private double menuHeight = 250;
     
     // Action duration in game minutes
     private static final int HARVEST_DURATION = 5;
@@ -105,16 +107,18 @@ public class FarmlandInteraction {
     public void onMouseMove(double mouseX, double mouseY) {
         if (!visible) return;
         
-        // Check harvest button bounds (relative to menu)
+        // Button bounds (centered like ResourceInteraction)
         double btnY = menuY + menuHeight - 70;
         double btnWidth = 100;
         double btnHeight = 30;
-        double harvestBtnX = menuX + 20;
-        double cancelBtnX = menuX + menuWidth - 120;
         
+        // Harvest button (left of center)
+        double harvestBtnX = menuX + menuWidth / 2 - btnWidth - 10;
         harvestHovered = mouseX >= harvestBtnX && mouseX <= harvestBtnX + btnWidth &&
                         mouseY >= btnY && mouseY <= btnY + btnHeight;
         
+        // Cancel button (right of center)
+        double cancelBtnX = menuX + menuWidth / 2 + 10;
         cancelHovered = mouseX >= cancelBtnX && mouseX <= cancelBtnX + btnWidth &&
                        mouseY >= btnY && mouseY <= btnY + btnHeight;
     }
@@ -132,12 +136,12 @@ public class FarmlandInteraction {
             return true;
         }
         
-        // Check buttons
+        // Check buttons (centered positioning)
         double btnY = menuY + menuHeight - 70;
         double btnWidth = 100;
         double btnHeight = 30;
-        double harvestBtnX = menuX + 20;
-        double cancelBtnX = menuX + menuWidth - 120;
+        double harvestBtnX = menuX + menuWidth / 2 - btnWidth - 10;
+        double cancelBtnX = menuX + menuWidth / 2 + 10;
         
         // Harvest button
         if (mouseX >= harvestBtnX && mouseX <= harvestBtnX + btnWidth &&
@@ -228,7 +232,7 @@ public class FarmlandInteraction {
     }
     
     /**
-     * Renders the interaction menu.
+     * Renders the interaction menu (unified style with ResourceInteraction).
      */
     public void render(GraphicsContext gc) {
         if (!visible || targetFarmland == null) return;
@@ -246,61 +250,89 @@ public class FarmlandInteraction {
         gc.setFill(BG_MED);
         gc.fillRoundRect(menuX + 2, menuY + 2, menuWidth - 4, 35, 8, 8);
         
-        // Title
+        // Title with icon
         gc.setFill(TEXT_GOLD);
         gc.setFont(Font.font("Georgia", FontWeight.BOLD, 14));
-        gc.fillText(targetFarmland.getGrainType().getDisplayName() + " Field", menuX + 15, menuY + 25);
+        gc.fillText("🌾 " + targetFarmland.getGrainType().getDisplayName() + " Field", menuX + 15, menuY + 25);
         
         // Info section
-        double infoY = menuY + 50;
         gc.setFill(TEXT_WHITE);
         gc.setFont(Font.font("Georgia", 12));
         
-        // Growth stage
-        gc.fillText("Status: " + targetFarmland.getGrowthStage().getDisplayName(), menuX + 15, infoY);
-        infoY += 20;
+        double infoY = menuY + 55;
         
-        // Harvests remaining
-        gc.fillText("Harvests left: " + targetFarmland.getHarvestsRemaining(), menuX + 15, infoY);
-        infoY += 20;
+        // Growth stage/type
+        gc.fillText("Type: " + targetFarmland.getGrainType().getDisplayName(), menuX + 15, infoY);
         
-        // Time of day
-        String timeStr = gameTime.canFarm() ? "Daytime" : "Night (cannot farm)";
-        Color timeColor = gameTime.canFarm() ? TEXT_WHITE : Color.web("#ff6060");
-        gc.setFill(timeColor);
-        gc.fillText("Time: " + timeStr, menuX + 15, infoY);
-        infoY += 20;
+        // Status
+        gc.fillText("Status: " + targetFarmland.getGrowthStage().getDisplayName(), menuX + 15, infoY + 20);
         
-        // Energy
-        String energyStr = playerEnergy.getFormattedEnergy();
-        Color energyColor = playerEnergy.canFarm() ? TEXT_WHITE : Color.web("#ff6060");
-        gc.setFill(energyColor);
-        gc.fillText("Energy: " + energyStr + " (Cost: " + PlayerEnergy.FARMING_COST + ")", menuX + 15, infoY);
+        // Expected yield
+        int estimatedYield = targetFarmland.getEstimatedYield();
+        gc.fillText("Est. Yield: ~" + estimatedYield + " grain", menuX + 15, infoY + 40);
         
-        // Buttons
+        // Action time
+        gc.setFill(Color.web("#80a0c0"));
+        gc.fillText("Time: " + HARVEST_DURATION + " minutes", menuX + 15, infoY + 60);
+        
+        // Energy cost
+        int energyCost = PlayerEnergy.FARMING_COST;
+        String energyColor = playerEnergy.canFarm() ? "#80c080" : "#c08080";
+        gc.setFill(Color.web(energyColor));
+        gc.fillText("Energy Cost: " + energyCost, menuX + 15, infoY + 80);
+        
+        // Current energy
+        gc.setFill(TEXT_WHITE.deriveColor(0, 1, 1, 0.7));
+        gc.setFont(Font.font("Georgia", 10));
+        gc.fillText("Current Energy: " + playerEnergy.getCurrentEnergy() + "/" + playerEnergy.getMaxEnergy(),
+                   menuX + 15, infoY + 98);
+        
+        // Buttons (centered positioning)
+        renderButtons(gc);
+    }
+    
+    /**
+     * Renders the buttons (unified style with ResourceInteraction).
+     */
+    private void renderButtons(GraphicsContext gc) {
         double btnY = menuY + menuHeight - 70;
         double btnWidth = 100;
         double btnHeight = 30;
         
-        // Harvest button
         boolean canHarvestNow = canHarvest();
-        drawButton(gc, menuX + 20, btnY, btnWidth, btnHeight, "Harvest", 
-                  canHarvestNow, harvestHovered && canHarvestNow);
         
-        // Cancel button
-        drawButton(gc, menuX + menuWidth - 120, btnY, btnWidth, btnHeight, "Cancel", 
-                  true, cancelHovered);
+        // Harvest button (left of center)
+        double harvestX = menuX + menuWidth / 2 - btnWidth - 10;
+        Color harvestBg = !canHarvestNow ? BUTTON_DISABLED : 
+                          (harvestHovered ? BUTTON_HOVER : BUTTON_NORMAL);
+        gc.setFill(harvestBg);
+        gc.fillRoundRect(harvestX, btnY, btnWidth, btnHeight, 5, 5);
+        gc.setStroke(canHarvestNow ? BORDER : BORDER.deriveColor(0, 0.5, 0.7, 1));
+        gc.setLineWidth(1);
+        gc.strokeRoundRect(harvestX, btnY, btnWidth, btnHeight, 5, 5);
         
-        // Cannot harvest reason
-        if (!canHarvestNow) {
-            gc.setFill(Color.web("#ff8080"));
-            gc.setFont(Font.font("Georgia", 10));
-            gc.fillText(getCannotHarvestReason(), menuX + 15, menuY + menuHeight - 20);
-        }
+        gc.setFill(canHarvestNow ? TEXT_GOLD : TEXT_WHITE.deriveColor(0, 0.5, 0.7, 1));
+        gc.setFont(Font.font("Georgia", FontWeight.BOLD, 12));
+        gc.fillText("Harvest", harvestX + btnWidth / 2 - 25, btnY + 20);
+        
+        // Cancel button (right of center)
+        double cancelX = menuX + menuWidth / 2 + 10;
+        gc.setFill(cancelHovered ? BUTTON_HOVER : BUTTON_NORMAL);
+        gc.fillRoundRect(cancelX, btnY, btnWidth, btnHeight, 5, 5);
+        gc.setStroke(BORDER);
+        gc.strokeRoundRect(cancelX, btnY, btnWidth, btnHeight, 5, 5);
+        
+        gc.setFill(TEXT_WHITE);
+        gc.fillText("Cancel", cancelX + btnWidth / 2 - 22, btnY + 20);
+        
+        // Hint
+        gc.setFill(TEXT_WHITE.deriveColor(0, 1, 1, 0.5));
+        gc.setFont(Font.font("Georgia", 9));
+        gc.fillText("Right-click again to close", menuX + menuWidth / 2 - 60, menuY + menuHeight - 15);
     }
     
     /**
-     * Draws a button.
+     * Draws a button (legacy method - kept for compatibility).
      */
     private void drawButton(GraphicsContext gc, double x, double y, double w, double h,
                            String text, boolean enabled, boolean hovered) {

@@ -712,6 +712,17 @@ public class MarketplaceUI extends StackPane {
         
         Button sellAllBtn = createActionButton("Sell All", "#4a3020", "#6a4030");
         sellAllBtn.setOnAction(e -> sellItem(finalPrice, quantity, finalSlot));
+
+        // Disable selling if the current town produces this resource (not accepted locally)
+        String townSpec = currentTown != null ? currentTown.getSpecificResourceId() : null;
+        if (townSpec != null && townSpec.equals(item.getId())) {
+            sellBtn.setDisable(true);
+            sellAllBtn.setDisable(true);
+            Label note = new Label("Not accepted here (local product)");
+            note.setFont(Font.font("Georgia", 10));
+            note.setTextFill(Color.web("#c66"));
+            btnBox.getChildren().add(note);
+        }
         
         btnBox.getChildren().addAll(sellBtn, sellAllBtn);
         

@@ -38,6 +38,7 @@ public class SettingsMenu extends StackPane {
     private CheckBox moveToInteractCheck;
     private CheckBox basicGraphicsCheck;
     private CheckBox showGridCheck;
+    private CheckBox showGridNumbersCheck;
     private CheckBox instantTownMenuCheck;
     
     public SettingsMenu() {
@@ -75,6 +76,7 @@ public class SettingsMenu extends StackPane {
         moveToInteractCheck.setSelected(settings.isMoveToInteract());
         basicGraphicsCheck.setSelected(settings.isBasicGraphicsMode());
         showGridCheck.setSelected(settings.isShowGrid());
+        showGridNumbersCheck.setSelected(settings.isShowGridNumbers());
         instantTownMenuCheck.setSelected(settings.isInstantTownMenu());
     }
     
@@ -295,6 +297,14 @@ public class SettingsMenu extends StackPane {
         VBox showGridRow = new VBox(2);
         showGridRow.getChildren().addAll(showGridCheck, showGridHint);
         
+        // Show Grid Numbers (IDs)
+        showGridNumbersCheck = createCheckBox("Show Grid IDs", false);
+        Label showGridNumbersHint = new Label("Display tile numbers on the map (developer tool)");
+        showGridNumbersHint.setFont(Font.font("Arial", 10));
+        showGridNumbersHint.setTextFill(Color.web(TEXT_COLOR, 0.6));
+        VBox showGridNumbersRow = new VBox(2);
+        showGridNumbersRow.getChildren().addAll(showGridNumbersCheck, showGridNumbersHint);
+        
         // Instant Town Menu
         instantTownMenuCheck = createCheckBox("Instant Town Menu", false);
         Label instantTownHint = new Label("Skip guard conversation when entering towns");
@@ -303,7 +313,7 @@ public class SettingsMenu extends StackPane {
         VBox instantTownRow = new VBox(2);
         instantTownRow.getChildren().addAll(instantTownMenuCheck, instantTownHint);
         
-        section.getChildren().addAll(basicGraphicsRow, showGridRow, instantTownRow);
+        section.getChildren().addAll(basicGraphicsRow, showGridRow, showGridNumbersRow, instantTownRow);
         return section;
     }
     
@@ -438,6 +448,7 @@ public class SettingsMenu extends StackPane {
         // Apply new graphics/interface settings
         settings.setBasicGraphicsMode(basicGraphicsCheck.isSelected());
         settings.setShowGrid(showGridCheck.isSelected());
+        settings.setShowGridNumbers(showGridNumbersCheck.isSelected());
         settings.setInstantTownMenu(instantTownMenuCheck.isSelected());
         
         // Save to file

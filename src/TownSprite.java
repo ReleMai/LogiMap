@@ -76,16 +76,17 @@ public class TownSprite {
     public static void render(GraphicsContext gc, Town town, double x, double y, double size, boolean nearWater) {
         SettlementType type = getSettlementType(town, nearWater);
         VillageType villageType = town.getVillageType();
+        int variant = town.getVisualVariant();
         
         switch (type) {
             case VILLAGE:
-                renderVillageWithType(gc, x, y, size, villageType);
+                renderVillageWithVariant(gc, x, y, size, villageType, variant);
                 break;
             case TOWN:
-                renderTownWithType(gc, x, y, size, villageType);
+                renderTownWithVariant(gc, x, y, size, villageType, variant);
                 break;
             case CITY:
-                renderCity(gc, x, y, size);
+                renderCityWithVariant(gc, x, y, size, variant);
                 break;
             case CAPITAL:
                 renderCapital(gc, x, y, size);
@@ -97,9 +98,9 @@ public class TownSprite {
     }
     
     /**
-     * Village with village type-specific decorations.
+     * Village with visual variant (4 different layouts).
      */
-    private static void renderVillageWithType(GraphicsContext gc, double x, double y, double size, VillageType villageType) {
+    private static void renderVillageWithVariant(GraphicsContext gc, double x, double y, double size, VillageType villageType, int variant) {
         // Get colors from village type
         Color roofColor = villageType != null ? Color.web(villageType.getRoofColor()) : ROOF_BROWN;
         Color accentColor = villageType != null ? Color.web(villageType.getAccentColor()) : Color.web("#2d5016");
@@ -111,13 +112,30 @@ public class TownSprite {
         gc.setFill(accentColor.deriveColor(0, 1, 1, 0.3));
         gc.fillOval(x + size * 0.1, y + size * 0.1, size * 0.8, size * 0.8);
         
-        // Draw 3-4 small houses
-        double[][] housePositions = {
-            {0.25, 0.25},
-            {0.55, 0.20},
-            {0.20, 0.55},
-            {0.50, 0.50}
-        };
+        // Different house layouts based on variant
+        double[][] housePositions;
+        switch (variant) {
+            case 0: // Clustered center
+                housePositions = new double[][] {
+                    {0.30, 0.25}, {0.50, 0.22}, {0.25, 0.50}, {0.48, 0.48}
+                };
+                break;
+            case 1: // Diamond formation
+                housePositions = new double[][] {
+                    {0.40, 0.15}, {0.20, 0.40}, {0.55, 0.40}, {0.38, 0.55}
+                };
+                break;
+            case 2: // L-shape
+                housePositions = new double[][] {
+                    {0.20, 0.20}, {0.45, 0.20}, {0.20, 0.45}, {0.20, 0.65}
+                };
+                break;
+            default: // Square formation
+                housePositions = new double[][] {
+                    {0.22, 0.22}, {0.52, 0.22}, {0.22, 0.52}, {0.52, 0.52}
+                };
+                break;
+        }
         
         Color[] houseColors = {BUILDING_1, BUILDING_2, BUILDING_3, BUILDING_1};
         
@@ -126,7 +144,7 @@ public class TownSprite {
             double hy = y + housePositions[i][1] * size;
             
             // House body
-            gc.setFill(houseColors[i]);
+            gc.setFill(houseColors[(i + variant) % 4]);
             gc.fillRect(hx, hy, houseSize, houseSize);
             
             // Roof with village type color
@@ -141,16 +159,69 @@ public class TownSprite {
             gc.setFill(DOOR_COLOR);
             gc.fillRect(hx + houseSize * 0.35, hy + houseSize * 0.5, houseSize * 0.3, houseSize * 0.5);
             
-            // Window
-            if (i < 2) {
+            // Window (variant determines which houses have windows)
+            if ((i + variant) % 3 != 0) {
                 gc.setFill(WINDOW_COLOR);
                 gc.fillRect(hx + houseSize * 0.15, hy + houseSize * 0.2, houseSize * 0.2, houseSize * 0.2);
             }
         }
         
-        // Draw village type icon/decoration in center
-        // Removed: renderVillageTypeDecoration(gc, x, y, size, villageType);
-        // Villages now appear cleaner without overlay icons
+        // Optional: Add a well or tree in center for some variants
+        if (variant == 1) {
+            // Draw a well
+            double wellX = x + size * 0.38;
+            double wellY = y + size * 0.38;
+            gc.setFill(Color.web("#696969"));
+            gc.fillOval(wellX, wellY, size * 0.14, size * 0.14);
+            gc.setFill(Color.web("#4a90c0"));
+            gc.fillOval(wellX + size * 0.02, wellY + size * 0.02, size * 0.10, size * 0.10);
+        } else if (variant == 3) {
+            // Draw a tree
+            double treeX = x + size * 0.35;
+            double treeY = y + size * 0.35;
+            gc.setFill(Color.web("#8b4513"));
+            gc.fillRect(treeX + size * 0.06, treeY + size * 0.10, size * 0.04, size * 0.10);
+            gc.setFill(Color.web("#228b22"));
+            gc.fillOval(treeX, treeY, size * 0.16, size * 0.14);
+        }
+        
+        // Themed accents per village type for immersion
+        if (villageType == VillageType.MINING) {
+            // Small mine entrance or slag pile
+            double mx = x + size * 0.08;
+            double my = y + size * 0.72;
+            gc.setFill(Color.web("#60584f"));
+            gc.fillOval(mx, my, size * 0.14, size * 0.08);
+            gc.setFill(Color.web("#444"));
+            gc.fillRect(mx + size * 0.02, my - size * 0.04, size * 0.08, size * 0.06);
+            // Add a tiny pickaxe icon
+            gc.setStroke(Color.web("#333"));
+            gc.setLineWidth(1);
+            gc.strokeLine(mx + size * 0.06, my - size * 0.03, mx + size * 0.12, my + size * 0.02);
+        } else if (villageType == VillageType.FISHING) {
+            // Fish racks / drying lines near the water side of village
+            double fx = x + size * 0.65;
+            double fy = y + size * 0.42;
+            gc.setStroke(Color.web("#8b7355"));
+            gc.setLineWidth(1.5);
+            gc.strokeLine(fx, fy, fx + size * 0.12, fy - size * 0.06);
+            gc.strokeLine(fx + size * 0.02, fy + size * 0.02, fx + size * 0.14, fy - size * 0.02);
+            // Small boat by variant
+            if (variant % 2 == 0) {
+                double shipX = x + size * 0.68;
+                double shipY = y + size * 0.78;
+                gc.setFill(DOCK_COLOR);
+                gc.fillPolygon(new double[]{shipX, shipX + size * 0.02, shipX + size * 0.06}, new double[]{shipY + size * 0.02, shipY, shipY + size * 0.02}, 3);
+            }
+        } else if (villageType == VillageType.AGRICULTURAL) {
+            // Small fields or a windmill marker
+            double wx = x + size * 0.7;
+            double wy = y + size * 0.18;
+            gc.setFill(Color.web("#c9b575"));
+            gc.fillRect(wx, wy, size * 0.12, size * 0.06);
+            gc.setFill(Color.web("#8b4513"));
+            gc.fillRect(wx + size * 0.05, wy - size * 0.06, size * 0.02, size * 0.06);
+        }
     }
     
     /**
@@ -240,7 +311,202 @@ public class TownSprite {
     }
     
     /**
-     * Town with village type-specific theming.
+     * Town with visual variant (4 different layouts).
+     */
+    private static void renderTownWithVariant(GraphicsContext gc, double x, double y, double size, VillageType villageType, int variant) {
+        Color roofColor = villageType != null ? Color.web(villageType.getRoofColor()) : ROOF_BROWN;
+        Color accentColor = villageType != null ? Color.web(villageType.getAccentColor()) : Color.web("#3a3a3a");
+        
+        // Paved area shape based on variant
+        gc.setFill(Color.web("#9a8878", 0.6));
+        switch (variant) {
+            case 0: // Square market
+                gc.fillRect(x + size * 0.2, y + size * 0.2, size * 0.6, size * 0.6);
+                break;
+            case 1: // Circular plaza
+                gc.fillOval(x + size * 0.15, y + size * 0.15, size * 0.7, size * 0.7);
+                break;
+            case 2: // Diamond shape
+                gc.fillPolygon(
+                    new double[]{x + size * 0.5, x + size * 0.85, x + size * 0.5, x + size * 0.15},
+                    new double[]{y + size * 0.15, y + size * 0.5, y + size * 0.85, y + size * 0.5},
+                    4
+                );
+                break;
+            default: // Rectangular
+                gc.fillRect(x + size * 0.15, y + size * 0.25, size * 0.7, size * 0.5);
+                break;
+        }
+        
+        // Market square with accent
+        gc.setFill(accentColor.deriveColor(0, 0.5, 1.5, 0.4));
+        gc.fillRect(x + size * 0.35, y + size * 0.35, size * 0.3, size * 0.3);
+        
+        // Buildings around the square - positions vary by variant
+        double buildingW = size * 0.18;
+        double buildingH = size * 0.22;
+        
+        double[][] buildingPositions;
+        switch (variant) {
+            case 0:
+                buildingPositions = new double[][] {
+                    {0.15, 0.10}, {0.45, 0.08}, {0.12, 0.65}, {0.55, 0.68}, {0.02, 0.35}, {0.72, 0.30}
+                };
+                break;
+            case 1:
+                buildingPositions = new double[][] {
+                    {0.20, 0.05}, {0.55, 0.10}, {0.08, 0.55}, {0.60, 0.60}, {0.05, 0.25}, {0.75, 0.35}
+                };
+                break;
+            case 2:
+                buildingPositions = new double[][] {
+                    {0.35, 0.02}, {0.62, 0.25}, {0.62, 0.55}, {0.35, 0.75}, {0.08, 0.55}, {0.08, 0.25}
+                };
+                break;
+            default:
+                buildingPositions = new double[][] {
+                    {0.18, 0.08}, {0.50, 0.05}, {0.15, 0.70}, {0.52, 0.72}, {0.02, 0.40}, {0.78, 0.38}
+                };
+                break;
+        }
+        
+        Color[] roofVariants = {roofColor, roofColor.darker(), roofColor.brighter(), roofColor, roofColor.darker(), roofColor.brighter()};
+        Color[] buildingColors = {BUILDING_1, BUILDING_2, BUILDING_3, BUILDING_1, BUILDING_2, BUILDING_3};
+        
+        for (int i = 0; i < buildingPositions.length; i++) {
+            drawBuilding(gc, x + buildingPositions[i][0] * size, y + buildingPositions[i][1] * size, 
+                buildingW * (0.9 + (i % 2) * 0.3), buildingH * (0.9 + (i % 3) * 0.1), 
+                buildingColors[i], roofVariants[i]);
+        }
+        
+        // Center feature varies by variant
+        if (variant == 0 || variant == 3) {
+            // Market stall
+            gc.setFill(Color.web("#cc9966"));
+            gc.fillRect(x + size * 0.42, y + size * 0.42, size * 0.16, size * 0.16);
+            gc.setFill(Color.web("#ffffff", 0.8));
+            gc.fillRect(x + size * 0.40, y + size * 0.38, size * 0.20, size * 0.06);
+        } else if (variant == 1) {
+            // Fountain
+            gc.setFill(Color.web("#696969"));
+            gc.fillOval(x + size * 0.40, y + size * 0.40, size * 0.20, size * 0.20);
+            gc.setFill(Color.web("#4a90c0"));
+            gc.fillOval(x + size * 0.43, y + size * 0.43, size * 0.14, size * 0.14);
+        } else {
+            // Statue
+            gc.setFill(Color.web("#808080"));
+            gc.fillRect(x + size * 0.44, y + size * 0.35, size * 0.12, size * 0.25);
+            gc.fillOval(x + size * 0.42, y + size * 0.30, size * 0.16, size * 0.12);
+        }
+    }
+    
+    /**
+     * City with visual variant (4 different layouts).
+     */
+    private static void renderCityWithVariant(GraphicsContext gc, double x, double y, double size, int variant) {
+        // Outer wall shape varies
+        gc.setFill(WALL_COLOR);
+        switch (variant) {
+            case 0: // Square fortress
+                gc.fillRect(x + size * 0.08, y + size * 0.08, size * 0.84, size * 0.84);
+                gc.setFill(Color.web("#a09080"));
+                gc.fillRect(x + size * 0.12, y + size * 0.12, size * 0.76, size * 0.76);
+                break;
+            case 1: // Rounded walls
+                gc.fillOval(x + size * 0.06, y + size * 0.06, size * 0.88, size * 0.88);
+                gc.setFill(Color.web("#a09080"));
+                gc.fillOval(x + size * 0.10, y + size * 0.10, size * 0.80, size * 0.80);
+                break;
+            case 2: // Hexagonal
+                double[] hexX = new double[6];
+                double[] hexY = new double[6];
+                for (int i = 0; i < 6; i++) {
+                    double angle = Math.PI / 6 + i * Math.PI / 3;
+                    hexX[i] = x + size * 0.5 + size * 0.44 * Math.cos(angle);
+                    hexY[i] = y + size * 0.5 + size * 0.44 * Math.sin(angle);
+                }
+                gc.fillPolygon(hexX, hexY, 6);
+                gc.setFill(Color.web("#a09080"));
+                for (int i = 0; i < 6; i++) {
+                    double angle = Math.PI / 6 + i * Math.PI / 3;
+                    hexX[i] = x + size * 0.5 + size * 0.38 * Math.cos(angle);
+                    hexY[i] = y + size * 0.5 + size * 0.38 * Math.sin(angle);
+                }
+                gc.fillPolygon(hexX, hexY, 6);
+                break;
+            default: // Diamond shape
+                gc.fillPolygon(
+                    new double[]{x + size * 0.5, x + size * 0.92, x + size * 0.5, x + size * 0.08},
+                    new double[]{y + size * 0.08, y + size * 0.5, y + size * 0.92, y + size * 0.5},
+                    4
+                );
+                gc.setFill(Color.web("#a09080"));
+                gc.fillPolygon(
+                    new double[]{x + size * 0.5, x + size * 0.85, x + size * 0.5, x + size * 0.15},
+                    new double[]{y + size * 0.15, y + size * 0.5, y + size * 0.85, y + size * 0.5},
+                    4
+                );
+                break;
+        }
+        
+        // Inner buildings - vary layout by variant
+        double buildingW = size * 0.14;
+        double buildingH = size * 0.18;
+        
+        // Central keep/castle
+        gc.setFill(WALL_COLOR);
+        gc.fillRect(x + size * 0.38, y + size * 0.38, size * 0.24, size * 0.24);
+        gc.setFill(WALL_TOP);
+        gc.fillRect(x + size * 0.40, y + size * 0.40, size * 0.20, size * 0.20);
+        
+        // Tower on keep
+        gc.setFill(WALL_COLOR);
+        gc.fillRect(x + size * 0.45, y + size * 0.30, size * 0.10, size * 0.15);
+        gc.setFill(TOWER_GOLD);
+        gc.fillPolygon(
+            new double[]{x + size * 0.44, x + size * 0.50, x + size * 0.56},
+            new double[]{y + size * 0.30, y + size * 0.22, y + size * 0.30},
+            3
+        );
+        
+        // Surrounding buildings - positions depend on variant
+        double[][] buildingPos;
+        switch (variant) {
+            case 0:
+                buildingPos = new double[][] {
+                    {0.15, 0.15}, {0.65, 0.15}, {0.15, 0.65}, {0.65, 0.65},
+                    {0.40, 0.15}, {0.15, 0.40}, {0.65, 0.40}, {0.40, 0.65}
+                };
+                break;
+            case 1:
+                buildingPos = new double[][] {
+                    {0.25, 0.18}, {0.55, 0.18}, {0.18, 0.50}, {0.65, 0.50},
+                    {0.25, 0.70}, {0.55, 0.70}, {0.40, 0.12}, {0.40, 0.75}
+                };
+                break;
+            default:
+                buildingPos = new double[][] {
+                    {0.22, 0.25}, {0.60, 0.25}, {0.22, 0.55}, {0.60, 0.55},
+                    {0.35, 0.18}, {0.52, 0.18}, {0.35, 0.68}, {0.52, 0.68}
+                };
+                break;
+        }
+        
+        Color[] roofs = {ROOF_RED, ROOF_BLUE, ROOF_BROWN, ROOF_RED, ROOF_BROWN, ROOF_BLUE, ROOF_RED, ROOF_BROWN};
+        Color[] walls = {BUILDING_1, BUILDING_2, BUILDING_3, BUILDING_1, BUILDING_2, BUILDING_3, BUILDING_1, BUILDING_2};
+        
+        for (int i = 0; i < buildingPos.length; i++) {
+            drawBuilding(gc, x + buildingPos[i][0] * size, y + buildingPos[i][1] * size, 
+                buildingW * (0.9 + (i % 2) * 0.2), buildingH * (0.85 + (i % 3) * 0.1), 
+                walls[i], roofs[i]);
+        }
+        
+        // Corner towers
+        renderCornerTowers(gc, x, y, size, variant == 0 || variant == 3);
+    }
+    
+    /**
+     * Town with village type-specific theming (legacy, still used by renderTownWithType).
      */
     private static void renderTownWithType(GraphicsContext gc, double x, double y, double size, VillageType villageType) {
         Color roofColor = villageType != null ? Color.web(villageType.getRoofColor()) : ROOF_BROWN;
