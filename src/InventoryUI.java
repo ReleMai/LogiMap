@@ -1,457 +1,740 @@
-import javafx.animation.*;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.ToggleButton;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
-import javafx.scene.effect.DropShadow;
-import javafx.scene.input.MouseButton;
-import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
-import javafx.util.Duration;
-
-import java.util.function.BiConsumer;
+import java.util.List;
+import java.util.ArrayList;
 
 /**
- * Visual grid-based inventory UI component.
- * Supports drag-and-drop, shift-click transfers, and item tooltips.
+ * Grid-based inventory panel with proper item slots and drag/drop.
+ * Shows items in a scrollable grid with item info.
  */
 public class InventoryUI extends VBox {
     
-    // Style constants - Medieval theme
-    private static final String DARK_BG = "#1f1a10";
-    private static final String MEDIUM_BG = "#2d2418";
-    private static final String LIGHT_BG = "#3d3020";
-    private static final String ACCENT_COLOR = "#c4a574";
-    private static final String TEXT_COLOR = "#d4c4a4";
-    private static final String SLOT_BG = "#252015";
-    private static final String SLOT_HOVER = "#3a3020";
-    private static final String SLOT_SELECTED = "#4a4030";
-    private static final String BORDER_COLOR = "#5a4a30";
+    // Medieval theme colors
+    private static final String BG_DARK = "#1a1208";
+    private static final String BG_MED = "#2a1f10";
+    private static final String BG_LIGHT = "#3a2a15";
+    private static final String GOLD = "#c4a574";
+    private static final String TEXT = "#e8dcc8";
+    private static final String TEXT_DIM = "#a89878";
+    private static final String BORDER = "#5a4a30";
+    private static final String SLOT_EMPTY = "#151210";
     
-    // Slot size - smaller for compact UI
-    private static final int SLOT_SIZE = 40;
-    private static final int SLOT_PADDING = 3;
+    private static final int PANEL_WIDTH = 320;
+    private static final int SLOT_SIZE = 48;
+    private static final int SLOT_GAP = 4;
+    private static final int VISIBLE_ROWS = 4;
     
-    // Inventory reference
-    private final Inventory inventory;
-    private final Canvas canvas;
-    private final GraphicsContext gc;
+    // Sorting filter options
+    public enum SortMode {
+        ALL("All", "📦"),
+        EQUIPMENT("Equipment", "⚔"),
+        RESOURCES("Resources", "🪵"),
+        CONSUMABLES("Food", "🍖"),
+        VALUABLES("Valuables", "💎");
+        
+        private final String name;
+        private final String icon;
+        
+        SortMode(String name, String icon) {
+            this.name = name;
+            this.icon = icon;
+        }
+        
+        public String getName() { return name; }
+        public String getIcon() { return icon; }
+    }
     
-    // Interaction state
-    private int hoveredSlot = -1;
+    private SortMode currentSortMode = SortMode.ALL;
+    private List<Integer> filteredSlots; // Indices of slots to display based on filter
+    
+    private Inventory inventory;
+    private Canvas[] slots;
     private int selectedSlot = -1;
-    private ItemStack draggedItem = null;
-    private double dragX, dragY;
+    private ItemStack draggedStack = null;
+    
+    private double dragStartX, dragStartY;
     private boolean isDragging = false;
-    
-    // Tooltip
-    private Tooltip itemTooltip;
-    
-    // Events
-    private BiConsumer<Integer, ItemStack> onSlotClick;
-    private BiConsumer<Integer, Inventory> onShiftClick;
     private Runnable onClose;
     
-    // Animation
-    private AnimationTimer renderTimer;
+    // Info panel elements
+    private Label itemNameLabel;
+    private Label itemDescLabel;
+    private VBox itemInfoBox;
+    private PlayerSprite player; // Reference to player for equipping
+    
+    // Drag and drop support
+    private static ItemStack draggedItem = null;
+    private static int draggedFromSlot = -1;
+    private static InventoryUI draggedFromInventory = null;
     
     public InventoryUI(Inventory inventory) {
+        this(inventory, null);
+    }
+    
+    public InventoryUI(Inventory inventory, PlayerSprite player) {
         this.inventory = inventory;
+        this.player = player;
+        this.slots = new Canvas[inventory.getSize()];
         
-        setSpacing(6);
-        setPadding(new Insets(8));
-        setMaxWidth(Region.USE_PREF_SIZE);
-        setMaxHeight(Region.USE_PREF_SIZE);
+        setPrefWidth(PANEL_WIDTH);
+        setMaxWidth(PANEL_WIDTH);
         setStyle(
-            "-fx-background-color: " + MEDIUM_BG + ";" +
+            "-fx-background-color: " + BG_MED + ";" +
             "-fx-background-radius: 8;" +
-            "-fx-border-color: " + BORDER_COLOR + ";" +
+            "-fx-border-color: " + BORDER + ";" +
             "-fx-border-width: 2;" +
-            "-fx-border-radius: 8;"
+            "-fx-border-radius: 8;" +
+            "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.5), 10, 0, 2, 2);"
+        );
+        setSpacing(0);
+        setPadding(new Insets(0));
+        
+        getChildren().addAll(
+            createTitleBar(),
+            createFilterBar(),
+            createDecorationLine(),
+            createInventoryGrid(),
+            createInfoPanel()
         );
         
-        // Title bar
-        HBox titleBar = createTitleBar();
+        // Register for inventory changes to auto-refresh
+        inventory.setOnInventoryChanged(() -> {
+            javafx.application.Platform.runLater(() -> refresh());
+        });
         
-        // Canvas for rendering slots
-        int canvasWidth = inventory.getCols() * (SLOT_SIZE + SLOT_PADDING) + SLOT_PADDING;
-        int canvasHeight = inventory.getRows() * (SLOT_SIZE + SLOT_PADDING) + SLOT_PADDING;
+        // Add scene-level mouse release handler to clean up drag state
+        // This catches cases where drag ends outside of any slot
+        sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene != null) {
+                newScene.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_RELEASED, e -> {
+                    // If we're still in drag state when mouse is released anywhere, clean up
+                    if (draggedItem != null || draggedStack != null || DragOverlay.isDragging()) {
+                        cleanupDragState();
+                    }
+                });
+            }
+        });
+    }
+    
+    /**
+     * Comprehensive cleanup of all drag-related state.
+     */
+    private void cleanupDragState() {
+        // Clear static state
+        int sourceSlot = draggedFromSlot;
+        draggedItem = null;
+        draggedFromSlot = -1;
+        draggedFromInventory = null;
         
-        canvas = new Canvas(canvasWidth, canvasHeight);
-        gc = canvas.getGraphicsContext2D();
+        // Clear instance state
+        draggedStack = null;
         
-        // Setup interaction
-        setupMouseHandlers();
+        // End drag overlay
+        DragOverlay.endDrag();
         
-        // Create tooltip
-        itemTooltip = new Tooltip();
-        itemTooltip.setStyle(
-            "-fx-background-color: " + DARK_BG + ";" +
-            "-fx-text-fill: " + TEXT_COLOR + ";" +
-            "-fx-padding: 8;" +
-            "-fx-font-size: 12;"
-        );
-        Tooltip.install(canvas, itemTooltip);
+        // Remove visual feedback from source slot
+        if (sourceSlot >= 0 && sourceSlot < slots.length && slots[sourceSlot] != null) {
+            slots[sourceSlot].setStyle("");
+        }
         
-        // Inventory change listener
-        inventory.setOnSlotChanged(slot -> render());
-        inventory.setOnInventoryChanged(this::render);
-        
-        getChildren().addAll(titleBar, canvas);
-        
-        // Initial render
-        render();
+        // Refresh all slots to reset visual state
+        refresh();
+    }
+    
+    /**
+     * Gets the currently dragged item (for cross-panel drag-drop).
+     */
+    public static ItemStack getDraggedItem() { return draggedItem; }
+    public static int getDraggedFromSlot() { return draggedFromSlot; }
+    public static InventoryUI getDraggedFromInventory() { return draggedFromInventory; }
+    
+    /**
+     * Clears drag state.
+     */
+    public static void clearDragState() {
+        draggedItem = null;
+        draggedFromSlot = -1;
+        draggedFromInventory = null;
+    }
+    
+    /**
+     * Finds the item ID for an equipment type (for converting equipment back to inventory items).
+     */
+    private String findItemIdForEquipment(Equipment.Type type) {
+        return switch (type) {
+            case RAGGED_SHIRT -> "ragged_shirt";
+            case RAGGED_PANTS -> "ragged_pants";
+            case CLOTH_SHIRT -> "cloth_shirt";
+            case CLOTH_PANTS -> "cloth_pants";
+            case LEATHER_CAP -> "leather_cap";
+            case LEATHER_VEST -> "leather_vest";
+            case LEATHER_PANTS -> "leather_pants";
+            case LEATHER_BOOTS -> "leather_boots";
+            case IRON_HELM -> "iron_helm";
+            case IRON_PLATE -> "iron_chest";
+            case IRON_GREAVES -> "iron_greaves";
+            case IRON_BOOTS -> "iron_boots";
+            case IRON_SWORD -> "iron_sword";
+            case IRON_SHIELD -> "iron_shield";
+            case WOODEN_SWORD -> "wooden_sword";
+            case WOODEN_SHIELD -> "wooden_shield";
+            case CLOTH_CAPE -> "cloth_cape";
+            default -> null;
+        };
     }
     
     private HBox createTitleBar() {
-        HBox titleBar = new HBox(10);
-        titleBar.setAlignment(Pos.CENTER_LEFT);
+        HBox bar = new HBox();
+        bar.setPadding(new Insets(6, 10, 6, 10));
+        bar.setAlignment(Pos.CENTER_LEFT);
+        bar.setStyle(
+            "-fx-background-color: linear-gradient(to bottom, " + BG_LIGHT + ", " + BG_MED + ");" +
+            "-fx-background-radius: 6 6 0 0;" +
+            "-fx-border-color: " + BORDER + ";" +
+            "-fx-border-width: 0 0 1 0;"
+        );
+        bar.setCursor(javafx.scene.Cursor.MOVE);
         
-        Label title = new Label(inventory.getName());
-        title.setFont(Font.font("System", FontWeight.BOLD, 14));
-        title.setTextFill(Color.web(ACCENT_COLOR));
+        Label title = new Label("Inventory");
+        title.setTextFill(Color.web(GOLD));
+        title.setFont(Font.font("Georgia", FontWeight.BOLD, 13));
         
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         
-        // Sort buttons
-        Button sortNameBtn = createSortButton("A-Z", "Sort by name", () -> inventory.sort(Inventory.SortMode.NAME));
-        Button sortRarityBtn = createSortButton("★", "Sort by rarity", () -> inventory.sort(Inventory.SortMode.RARITY));
-        Button sortValueBtn = createSortButton("$", "Sort by value", () -> inventory.sort(Inventory.SortMode.VALUE));
-        Button stackBtn = createSortButton("⊞", "Stack items", () -> inventory.stackItems());
+        // Capacity label
+        Label capacityLabel = new Label(getItemCount() + "/" + inventory.getSize());
+        capacityLabel.setTextFill(Color.web(TEXT_DIM));
+        capacityLabel.setFont(Font.font("Georgia", 11));
         
-        // Close button
-        Button closeBtn = new Button("✕");
-        closeBtn.setTooltip(new Tooltip("Close"));
-        closeBtn.setStyle(
-            "-fx-background-color: transparent;" +
-            "-fx-text-fill: #e05050;" +
-            "-fx-padding: 4 8 4 8;" +
-            "-fx-cursor: hand;"
-        );
-        closeBtn.setOnMouseEntered(e -> closeBtn.setStyle(
-            "-fx-background-color: #503030;" +
-            "-fx-text-fill: #ff7070;" +
-            "-fx-padding: 4 8 4 8;" +
-            "-fx-cursor: hand;"
-        ));
-        closeBtn.setOnMouseExited(e -> closeBtn.setStyle(
-            "-fx-background-color: transparent;" +
-            "-fx-text-fill: #e05050;" +
-            "-fx-padding: 4 8 4 8;" +
-            "-fx-cursor: hand;"
-        ));
-        closeBtn.setOnAction(e -> {
-            if (onClose != null) onClose.run();
-        });
+        // No close button - windows stay open in side panel
+        bar.getChildren().addAll(title, spacer, capacityLabel);
         
-        // Slot count
-        Label slotCount = new Label(inventory.getUsedSlots() + "/" + inventory.getSize());
-        slotCount.setTextFill(Color.web(TEXT_COLOR, 0.7));
-        slotCount.setFont(Font.font("System", 11));
-        
-        inventory.setOnInventoryChanged(() -> {
-            slotCount.setText(inventory.getUsedSlots() + "/" + inventory.getSize());
-            render();
-        });
-        
-        titleBar.getChildren().addAll(title, spacer, sortNameBtn, sortRarityBtn, sortValueBtn, stackBtn, slotCount, closeBtn);
-        
-        return titleBar;
+        setupDragging(bar);
+        return bar;
     }
     
-    private Button createSortButton(String text, String tooltip, Runnable action) {
-        Button btn = new Button(text);
-        btn.setTooltip(new Tooltip(tooltip));
-        btn.setStyle(
-            "-fx-background-color: " + LIGHT_BG + ";" +
-            "-fx-text-fill: " + TEXT_COLOR + ";" +
-            "-fx-padding: 4 8 4 8;" +
-            "-fx-font-size: 11;" +
+    /**
+     * Creates a decorative filter bar with category tabs.
+     */
+    private HBox createFilterBar() {
+        HBox bar = new HBox(2);
+        bar.setPadding(new Insets(6, 8, 6, 8));
+        bar.setAlignment(Pos.CENTER);
+        bar.setStyle("-fx-background-color: " + BG_DARK + ";");
+        
+        ToggleGroup filterGroup = new ToggleGroup();
+        
+        for (SortMode mode : SortMode.values()) {
+            ToggleButton btn = createFilterButton(mode, filterGroup);
+            bar.getChildren().add(btn);
+            
+            if (mode == SortMode.ALL) {
+                btn.setSelected(true);
+            }
+        }
+        
+        // Sort button on the right
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        
+        Button sortBtn = new Button("↕");
+        sortBtn.setStyle(
+            "-fx-background-color: " + BG_LIGHT + ";" +
+            "-fx-text-fill: " + TEXT_DIM + ";" +
+            "-fx-font-size: 12;" +
+            "-fx-padding: 4 8;" +
+            "-fx-background-radius: 3;" +
             "-fx-cursor: hand;"
         );
-        btn.setOnAction(e -> action.run());
+        sortBtn.setTooltip(new Tooltip("Sort by value"));
+        sortBtn.setOnAction(e -> sortInventory());
+        sortBtn.setOnMouseEntered(ev -> sortBtn.setStyle(sortBtn.getStyle().replace(TEXT_DIM, GOLD)));
+        sortBtn.setOnMouseExited(ev -> sortBtn.setStyle(sortBtn.getStyle().replace(GOLD, TEXT_DIM)));
+        
+        bar.getChildren().addAll(spacer, sortBtn);
+        return bar;
+    }
+    
+    /**
+     * Creates a filter toggle button for a sort mode.
+     */
+    private ToggleButton createFilterButton(SortMode mode, ToggleGroup group) {
+        ToggleButton btn = new ToggleButton(mode.getIcon());
+        btn.setToggleGroup(group);
+        btn.setTooltip(new Tooltip(mode.getName()));
+        btn.setPrefWidth(36);
+        btn.setPrefHeight(26);
+        
+        String baseStyle = 
+            "-fx-background-color: " + BG_MED + ";" +
+            "-fx-text-fill: " + TEXT_DIM + ";" +
+            "-fx-font-size: 12;" +
+            "-fx-padding: 2 6;" +
+            "-fx-background-radius: 3;" +
+            "-fx-cursor: hand;";
+        
+        String selectedStyle = 
+            "-fx-background-color: " + BG_LIGHT + ";" +
+            "-fx-text-fill: " + GOLD + ";" +
+            "-fx-font-size: 12;" +
+            "-fx-padding: 2 6;" +
+            "-fx-background-radius: 3;" +
+            "-fx-border-color: " + BORDER + ";" +
+            "-fx-border-width: 0 0 2 0;" +
+            "-fx-cursor: hand;";
+        
+        btn.setStyle(baseStyle);
+        btn.selectedProperty().addListener((obs, wasSelected, isSelected) -> {
+            btn.setStyle(isSelected ? selectedStyle : baseStyle);
+            if (isSelected) {
+                currentSortMode = mode;
+                updateFilteredSlots();
+                refresh();
+            }
+        });
+        
         return btn;
     }
     
-    private void setupMouseHandlers() {
-        canvas.setOnMouseMoved(this::handleMouseMove);
-        canvas.setOnMousePressed(this::handleMousePress);
-        canvas.setOnMouseDragged(this::handleMouseDrag);
-        canvas.setOnMouseReleased(this::handleMouseRelease);
-        canvas.setOnMouseExited(e -> {
-            hoveredSlot = -1;
-            itemTooltip.hide();
-            render();
+    /**
+     * Creates a decorative line separator with medieval flourish.
+     */
+    private HBox createDecorationLine() {
+        HBox line = new HBox();
+        line.setAlignment(Pos.CENTER);
+        line.setPadding(new Insets(0, 10, 0, 10));
+        
+        // Left decorative line
+        Region leftLine = new Region();
+        leftLine.setStyle("-fx-background-color: linear-gradient(to right, transparent, " + BORDER + ");");
+        leftLine.setPrefHeight(1);
+        HBox.setHgrow(leftLine, Priority.ALWAYS);
+        
+        // Center ornament
+        Label ornament = new Label("◆");
+        ornament.setTextFill(Color.web(BORDER));
+        ornament.setFont(Font.font("Georgia", 8));
+        ornament.setPadding(new Insets(0, 4, 0, 4));
+        
+        // Right decorative line
+        Region rightLine = new Region();
+        rightLine.setStyle("-fx-background-color: linear-gradient(to left, transparent, " + BORDER + ");");
+        rightLine.setPrefHeight(1);
+        HBox.setHgrow(rightLine, Priority.ALWAYS);
+        
+        line.getChildren().addAll(leftLine, ornament, rightLine);
+        return line;
+    }
+    
+    /**
+     * Updates the filtered slots list based on current sort mode.
+     */
+    private void updateFilteredSlots() {
+        filteredSlots = new ArrayList<>();
+        
+        for (int i = 0; i < inventory.getSize(); i++) {
+            ItemStack stack = inventory.getSlot(i);
+            if (stack == null || stack.isEmpty()) {
+                // Always show empty slots at the end
+                continue;
+            }
+            
+            Item item = stack.getItem();
+            boolean matches = switch (currentSortMode) {
+                case ALL -> true;
+                case EQUIPMENT -> item.isEquipment();
+                case RESOURCES -> isResource(item);
+                case CONSUMABLES -> isConsumable(item);
+                case VALUABLES -> isValuable(item);
+            };
+            
+            if (matches) {
+                filteredSlots.add(i);
+            }
+        }
+    }
+    
+    /**
+     * Checks if an item is a resource (wood, stone, ore, etc.).
+     */
+    private boolean isResource(Item item) {
+        String id = item.getId();
+        return id.contains("wood") || id.contains("stone") || id.contains("ore") || 
+               id.contains("log") || id.contains("iron") || id.contains("coal") ||
+               id.contains("plank") || id.contains("ingot") || id.contains("leather");
+    }
+    
+    /**
+     * Checks if an item is a consumable (food, potions, etc.).
+     */
+    private boolean isConsumable(Item item) {
+        String id = item.getId();
+        return id.contains("bread") || id.contains("meat") || id.contains("fish") ||
+               id.contains("apple") || id.contains("cheese") || id.contains("potion") ||
+               id.contains("food") || id.contains("herb") || id.contains("berry");
+    }
+    
+    /**
+     * Checks if an item is valuable (gems, gold items, rare drops).
+     */
+    private boolean isValuable(Item item) {
+        Item.Rarity rarity = item.getRarity();
+        return rarity == Item.Rarity.RARE || rarity == Item.Rarity.EPIC ||
+               rarity == Item.Rarity.LEGENDARY || item.getBaseValue() >= 50;
+    }
+    
+    /**
+     * Sorts the inventory by value (highest first).
+     */
+    private void sortInventory() {
+        // Collect all items
+        List<ItemStack> items = new ArrayList<>();
+        for (int i = 0; i < inventory.getSize(); i++) {
+            ItemStack stack = inventory.getSlot(i);
+            if (stack != null && !stack.isEmpty()) {
+                items.add(stack);
+                inventory.setSlot(i, null);
+            }
+        }
+        
+        // Sort by value descending
+        items.sort((a, b) -> Long.compare(b.getTotalValue(), a.getTotalValue()));
+        
+        // Put back in order
+        for (int i = 0; i < items.size(); i++) {
+            inventory.setSlot(i, items.get(i));
+        }
+        
+        refresh();
+    }
+    
+    private int getItemCount() {
+        int count = 0;
+        for (int i = 0; i < inventory.getSize(); i++) {
+            if (!inventory.isSlotEmpty(i)) count++;
+        }
+        return count;
+    }
+    
+    private ScrollPane createInventoryGrid() {
+        GridPane grid = new GridPane();
+        grid.setPadding(new Insets(10));
+        grid.setHgap(SLOT_GAP);
+        grid.setVgap(SLOT_GAP);
+        grid.setAlignment(Pos.CENTER);
+        grid.setStyle("-fx-background-color: " + BG_DARK + ";");
+        
+        int cols = inventory.getCols();
+        int rows = inventory.getRows();
+        
+        for (int i = 0; i < inventory.getSize(); i++) {
+            int row = i / cols;
+            int col = i % cols;
+            
+            Canvas slot = createSlot(i);
+            slots[i] = slot;
+            grid.add(slot, col, row);
+        }
+        
+        ScrollPane scroll = new ScrollPane(grid);
+        scroll.setFitToWidth(true);
+        scroll.setPrefHeight((SLOT_SIZE + SLOT_GAP) * Math.min(VISIBLE_ROWS, rows) + 20);
+        scroll.setMaxHeight((SLOT_SIZE + SLOT_GAP) * Math.min(VISIBLE_ROWS, rows) + 20);
+        scroll.setStyle("-fx-background: " + BG_DARK + "; -fx-background-color: " + BG_DARK + ";");
+        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        
+        return scroll;
+    }
+    
+    private Canvas createSlot(int index) {
+        Canvas canvas = new Canvas(SLOT_SIZE, SLOT_SIZE);
+        renderSlot(canvas, index);
+        
+        canvas.setOnMouseClicked(e -> {
+            ItemStack stack = inventory.getSlot(index);
+            if (stack != null && !stack.isEmpty()) {
+                selectedSlot = index;
+                updateItemInfo(stack);
+                refresh();
+                
+                // Double click to equip (if equippable)
+                if (e.getClickCount() == 2) {
+                    Item item = stack.getItem();
+                    if (item.isEquipment() && player != null) {
+                        Equipment equipment = item.toEquipment();
+                        if (equipment != null) {
+                            player.equip(equipment);
+                            // Remove the item from inventory
+                            stack.remove(1);
+                            if (stack.isEmpty()) {
+                                inventory.setSlot(index, null);
+                            }
+                            notifyItemEquipped(item);
+                            refresh();
+                        }
+                    }
+                }
+            } else {
+                selectedSlot = -1;
+                updateItemInfo(null);
+                refresh();
+            }
         });
-    }
-    
-    private void handleMouseMove(MouseEvent e) {
-        int slot = getSlotAtPosition(e.getX(), e.getY());
         
-        if (slot != hoveredSlot) {
-            hoveredSlot = slot;
-            updateTooltip(slot);
-            render();
-        }
-    }
-    
-    private void handleMousePress(MouseEvent e) {
-        int slot = getSlotAtPosition(e.getX(), e.getY());
-        if (slot == -1) return;
-        
-        ItemStack stack = inventory.getSlot(slot);
-        
-        if (e.getButton() == MouseButton.PRIMARY) {
-            if (e.isShiftDown() && onShiftClick != null) {
-                // Shift-click transfer
-                onShiftClick.accept(slot, inventory);
-            } else if (stack != null && !stack.isEmpty()) {
-                // Start drag
-                selectedSlot = slot;
-                isDragging = true;
-                draggedItem = stack.copy();
-                dragX = e.getX();
-                dragY = e.getY();
+        canvas.setOnMouseEntered(e -> {
+            ItemStack stack = inventory.getSlot(index);
+            if (stack != null && !stack.isEmpty()) {
+                Item item = stack.getItem();
+                Tooltip tip = new Tooltip(item.getName() + "\n" + item.getDescription());
+                tip.setStyle("-fx-background-color: " + BG_DARK + "; -fx-text-fill: " + TEXT + "; -fx-font-family: Georgia;");
+                Tooltip.install(canvas, tip);
             }
-        } else if (e.getButton() == MouseButton.SECONDARY) {
-            // Right-click: split stack in half
-            if (stack != null && stack.getQuantity() > 1) {
-                ItemStack split = stack.splitHalf();
-                ItemStack remaining = inventory.addItem(split);
-                if (remaining != null) {
-                    // Put back if couldn't add
-                    stack.add(remaining.getQuantity());
-                }
-            }
-        }
+        });
         
-        if (onSlotClick != null) {
-            onSlotClick.accept(slot, stack);
-        }
-        
-        render();
-    }
-    
-    private void handleMouseDrag(MouseEvent e) {
-        if (isDragging && draggedItem != null) {
-            dragX = e.getX();
-            dragY = e.getY();
-            render();
-        }
-    }
-    
-    private void handleMouseRelease(MouseEvent e) {
-        if (isDragging && draggedItem != null) {
-            int targetSlot = getSlotAtPosition(e.getX(), e.getY());
-            
-            if (targetSlot != -1 && targetSlot != selectedSlot) {
-                // Try to merge or swap
-                ItemStack targetStack = inventory.getSlot(targetSlot);
+        // Drag start - use static state for cross-panel drag
+        canvas.setOnDragDetected(e -> {
+            ItemStack stack = inventory.getSlot(index);
+            if (stack != null && !stack.isEmpty()) {
+                draggedItem = stack;
+                draggedFromSlot = index;
+                draggedFromInventory = this;
+                draggedStack = stack; // Keep local for internal drag
+                canvas.startFullDrag();
                 
-                if (targetStack == null || targetStack.isEmpty()) {
-                    // Move to empty slot
-                    inventory.swapSlots(selectedSlot, targetSlot);
-                } else if (targetStack.canMergeWith(draggedItem)) {
-                    // Merge stacks
-                    ItemStack sourceStack = inventory.getSlot(selectedSlot);
-                    ItemStack remaining = targetStack.merge(sourceStack);
-                    inventory.setSlot(selectedSlot, remaining);
-                } else {
-                    // Swap different items
-                    inventory.swapSlots(selectedSlot, targetSlot);
+                // Visual feedback - highlight the dragged slot
+                canvas.setStyle("-fx-effect: dropshadow(gaussian, #c4a574, 8, 0.6, 0, 0);");
+                
+                // Show ghost sprite at cursor
+                DragOverlay.startDrag(stack.getItem(), e.getSceneX(), e.getSceneY());
+            }
+        });
+        
+        // Track mouse movement for ghost sprite
+        canvas.setOnMouseDragged(e -> {
+            if (DragOverlay.isDragging()) {
+                DragOverlay.updatePosition(e.getSceneX(), e.getSceneY());
+            }
+        });
+        
+        // Drag over
+        canvas.setOnMouseDragEntered(e -> {
+            if (draggedItem != null || draggedStack != null) {
+                GraphicsContext gc = canvas.getGraphicsContext2D();
+                gc.setStroke(Color.web(GOLD));
+                gc.setLineWidth(2);
+                gc.strokeRoundRect(1, 1, SLOT_SIZE - 2, SLOT_SIZE - 2, 5, 5);
+            }
+        });
+        
+        canvas.setOnMouseDragExited(e -> {
+            renderSlot(canvas, index);
+        });
+        
+        // Drop - handle both internal and cross-panel drops
+        canvas.setOnMouseDragReleased(e -> {
+            // Check if dropping equipment from gear slot
+            Equipment draggedEquip = DragOverlay.getDraggedEquipment();
+            if (draggedEquip != null && player != null) {
+                // Unequip and add to this slot
+                Equipment.Slot fromSlot = DragOverlay.getDraggedFromSlot();
+                if (fromSlot != null) {
+                    player.unequip(fromSlot);
+                    String itemId = findItemIdForEquipment(draggedEquip.getType());
+                    if (itemId != null) {
+                        inventory.addItem(itemId, 1);
+                    }
+                    refresh();
+                    if (onItemEquipped != null) onItemEquipped.accept(null);
+                }
+            } else if (draggedStack != null) {
+                int fromIndex = findSlotIndex(draggedStack);
+                if (fromIndex != index && fromIndex != -1) {
+                    inventory.swapSlots(fromIndex, index);
+                    refresh();
                 }
             }
             
-            // Play animation
-            playDropAnimation(targetSlot != -1 ? targetSlot : selectedSlot);
-        }
+            // Use comprehensive cleanup
+            cleanupDragState();
+        });
         
-        isDragging = false;
-        draggedItem = null;
-        selectedSlot = -1;
-        render();
+        return canvas;
     }
     
-    private int getSlotAtPosition(double x, double y) {
-        int col = (int) ((x - SLOT_PADDING) / (SLOT_SIZE + SLOT_PADDING));
-        int row = (int) ((y - SLOT_PADDING) / (SLOT_SIZE + SLOT_PADDING));
-        
-        if (col < 0 || col >= inventory.getCols()) return -1;
-        if (row < 0 || row >= inventory.getRows()) return -1;
-        
-        // Check if actually inside the slot (not in padding)
-        double slotX = SLOT_PADDING + col * (SLOT_SIZE + SLOT_PADDING);
-        double slotY = SLOT_PADDING + row * (SLOT_SIZE + SLOT_PADDING);
-        
-        if (x < slotX || x > slotX + SLOT_SIZE) return -1;
-        if (y < slotY || y > slotY + SLOT_SIZE) return -1;
-        
-        return row * inventory.getCols() + col;
+    private int findSlotIndex(ItemStack stack) {
+        for (int i = 0; i < inventory.getSize(); i++) {
+            if (inventory.getSlot(i) == stack) return i;
+        }
+        return -1;
     }
     
-    private void updateTooltip(int slot) {
-        if (slot == -1) {
-            itemTooltip.setText("");
-            itemTooltip.hide();
-            return;
-        }
-        
-        ItemStack stack = inventory.getSlot(slot);
-        if (stack == null || stack.isEmpty()) {
-            itemTooltip.setText("Empty slot");
-        } else {
-            itemTooltip.setText(stack.getItem().getTooltip() + 
-                (stack.getQuantity() > 1 ? "\n\nQuantity: " + stack.getQuantity() : ""));
-        }
-    }
-    
-    // === Rendering ===
-    
-    public void render() {
-        // Clear canvas
-        gc.setFill(Color.web(DARK_BG));
-        gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
-        
-        // Draw slots
-        for (int row = 0; row < inventory.getRows(); row++) {
-            for (int col = 0; col < inventory.getCols(); col++) {
-                int slot = row * inventory.getCols() + col;
-                double x = SLOT_PADDING + col * (SLOT_SIZE + SLOT_PADDING);
-                double y = SLOT_PADDING + row * (SLOT_SIZE + SLOT_PADDING);
-                
-                renderSlot(slot, x, y);
-            }
-        }
-        
-        // Draw dragged item on top
-        if (isDragging && draggedItem != null) {
-            renderDraggedItem();
-        }
-    }
-    
-    private void renderSlot(int slot, double x, double y) {
-        ItemStack stack = inventory.getSlot(slot);
-        boolean isHovered = slot == hoveredSlot;
-        boolean isSelected = slot == selectedSlot;
+    private void renderSlot(Canvas canvas, int index) {
+        GraphicsContext gc = canvas.getGraphicsContext2D();
+        gc.clearRect(0, 0, SLOT_SIZE, SLOT_SIZE);
         
         // Slot background
-        if (isSelected) {
-            gc.setFill(Color.web(SLOT_SELECTED));
-        } else if (isHovered) {
-            gc.setFill(Color.web(SLOT_HOVER));
-        } else {
-            gc.setFill(Color.web(SLOT_BG));
-        }
-        gc.fillRoundRect(x, y, SLOT_SIZE, SLOT_SIZE, 6, 6);
+        gc.setFill(Color.web(SLOT_EMPTY));
+        gc.fillRoundRect(0, 0, SLOT_SIZE, SLOT_SIZE, 5, 5);
         
-        // Slot border
-        gc.setStroke(Color.web(LIGHT_BG));
-        gc.setLineWidth(1);
-        gc.strokeRoundRect(x, y, SLOT_SIZE, SLOT_SIZE, 6, 6);
-        
-        // Item
-        if (stack != null && !stack.isEmpty() && !isSelected) {
-            renderItem(stack, x + 4, y + 4, SLOT_SIZE - 8);
-        }
-        
-        // Highlight if hovered
-        if (isHovered && !isDragging) {
-            gc.setStroke(Color.web(ACCENT_COLOR, 0.6));
+        // Selection highlight
+        if (index == selectedSlot) {
+            gc.setStroke(Color.web(GOLD));
             gc.setLineWidth(2);
-            gc.strokeRoundRect(x + 1, y + 1, SLOT_SIZE - 2, SLOT_SIZE - 2, 5, 5);
+            gc.strokeRoundRect(1, 1, SLOT_SIZE - 2, SLOT_SIZE - 2, 5, 5);
+        } else {
+            gc.setStroke(Color.web(BORDER));
+            gc.setLineWidth(1);
+            gc.strokeRoundRect(0, 0, SLOT_SIZE, SLOT_SIZE, 5, 5);
+        }
+        
+        // Draw item if present
+        ItemStack stack = inventory.getSlot(index);
+        if (stack != null && !stack.isEmpty()) {
+            renderItem(gc, stack);
         }
     }
     
-    private void renderItem(ItemStack stack, double x, double y, double size) {
+    private void renderItem(GraphicsContext gc, ItemStack stack) {
         Item item = stack.getItem();
         
-        // Render item icon
-        item.renderIcon(gc, x, y, size);
+        // Use ItemRenderer for detailed medieval sprites (same as gear sheet)
+        Color primary = item.getPrimaryColor();
+        Color secondary = item.getSecondaryColor();
+        if (primary == null) primary = item.getRarity().getColor();
+        if (secondary == null) secondary = primary.darker();
         
-        // Quantity
+        double padding = 4;
+        double size = SLOT_SIZE - padding * 2;
+        
+        // Render based on item type using ItemRenderer
+        item.renderItemShape(gc, padding, padding, size);
+        
+        // Stack count
         if (stack.getQuantity() > 1) {
-            String qtyText = String.valueOf(stack.getQuantity());
-            gc.setFill(Color.BLACK);
-            gc.setFont(Font.font("System", FontWeight.BOLD, 11));
-            gc.fillText(qtyText, x + size - gc.getFont().getSize() * qtyText.length() * 0.6 + 1, y + size - 2 + 1);
-            gc.setFill(Color.WHITE);
-            gc.fillText(qtyText, x + size - gc.getFont().getSize() * qtyText.length() * 0.6, y + size - 2);
-        }
-        
-        // Durability bar (if applicable)
-        if (item.isEquipment() && item.getDurability() < item.getMaxDurability()) {
-            double durPercent = (double) item.getDurability() / item.getMaxDurability();
-            double barWidth = size * 0.8;
-            double barHeight = 3;
-            double barX = x + (size - barWidth) / 2;
-            double barY = y + size - barHeight - 2;
-            
-            // Background
-            gc.setFill(Color.web("#333333"));
-            gc.fillRect(barX, barY, barWidth, barHeight);
-            
-            // Durability
-            Color durColor = durPercent > 0.5 ? Color.web("#44ff44") : 
-                            durPercent > 0.25 ? Color.web("#ffff44") : Color.web("#ff4444");
-            gc.setFill(durColor);
-            gc.fillRect(barX, barY, barWidth * durPercent, barHeight);
+            gc.setFill(Color.web("#000000").deriveColor(0, 1, 1, 0.6));
+            gc.fillRoundRect(SLOT_SIZE - 18, SLOT_SIZE - 16, 16, 14, 3, 3);
+            gc.setFill(Color.web("#ffffff"));
+            gc.setFont(Font.font("Georgia", FontWeight.BOLD, 10));
+            String qty = stack.getQuantity() > 99 ? "99+" : String.valueOf(stack.getQuantity());
+            gc.fillText(qty, SLOT_SIZE - 16, SLOT_SIZE - 5);
         }
     }
     
-    private void renderDraggedItem() {
-        if (draggedItem == null) return;
+    private VBox createInfoPanel() {
+        itemInfoBox = new VBox(4);
+        itemInfoBox.setPadding(new Insets(10));
+        itemInfoBox.setStyle("-fx-background-color: " + BG_MED + "; -fx-background-radius: 0 0 6 6; -fx-border-color: " + BORDER + "; -fx-border-width: 1 0 0 0;");
+        itemInfoBox.setPrefHeight(80);
+        itemInfoBox.setMinHeight(80);
         
-        double size = SLOT_SIZE - 8;
-        double x = dragX - size / 2;
-        double y = dragY - size / 2;
+        itemNameLabel = new Label("Select an item");
+        itemNameLabel.setTextFill(Color.web(GOLD));
+        itemNameLabel.setFont(Font.font("Georgia", FontWeight.BOLD, 12));
         
-        // Semi-transparent
-        gc.setGlobalAlpha(0.8);
-        renderItem(draggedItem, x, y, size);
-        gc.setGlobalAlpha(1.0);
-    }
-    
-    private void playDropAnimation(int slot) {
-        int col = slot % inventory.getCols();
-        int row = slot / inventory.getCols();
-        double targetX = SLOT_PADDING + col * (SLOT_SIZE + SLOT_PADDING);
-        double targetY = SLOT_PADDING + row * (SLOT_SIZE + SLOT_PADDING);
+        itemDescLabel = new Label("Click on an item to see details\nDouble-click to equip");
+        itemDescLabel.setTextFill(Color.web(TEXT_DIM));
+        itemDescLabel.setFont(Font.font("Georgia", 10));
+        itemDescLabel.setWrapText(true);
         
-        // Simple scale animation effect
-        ScaleTransition scale = new ScaleTransition(Duration.millis(100), canvas);
-        scale.setFromX(1.02);
-        scale.setFromY(1.02);
-        scale.setToX(1.0);
-        scale.setToY(1.0);
-        scale.play();
+        itemInfoBox.getChildren().addAll(itemNameLabel, itemDescLabel);
+        return itemInfoBox;
     }
     
-    // === Public API ===
-    
-    public void setOnSlotClick(BiConsumer<Integer, ItemStack> callback) {
-        this.onSlotClick = callback;
+    private void updateItemInfo(ItemStack stack) {
+        if (stack != null && !stack.isEmpty()) {
+            Item item = stack.getItem();
+            itemNameLabel.setText(item.getName() + (stack.getQuantity() > 1 ? " x" + stack.getQuantity() : ""));
+            
+            StringBuilder desc = new StringBuilder(item.getDescription());
+            desc.append("\nRarity: ").append(item.getRarity().getDisplayName());
+            desc.append("\nValue: ").append(stack.getTotalValue()).append(" copper");
+            
+            if (item.isEquipment()) {
+                desc.append("\nSlot: ").append(item.getEquipSlot().name());
+                if (item.getAttack() > 0) desc.append("\nAttack: +").append(item.getAttack());
+                if (item.getDefense() > 0) desc.append("\nDefense: +").append(item.getDefense());
+                desc.append("\n[Double-click to equip]");
+            }
+            itemDescLabel.setText(desc.toString());
+        } else {
+            itemNameLabel.setText("Select an item");
+            itemDescLabel.setText("Click on an item to see details\nDouble-click to equip");
+        }
     }
     
-    public void setOnShiftClick(BiConsumer<Integer, Inventory> callback) {
-        this.onShiftClick = callback;
+    private Button createCloseButton() {
+        Button btn = new Button("X");
+        btn.setStyle("-fx-background-color: transparent; -fx-text-fill: " + TEXT + "; -fx-font-size: 12; -fx-padding: 0 4; -fx-cursor: hand;");
+        btn.setOnMouseEntered(e -> btn.setStyle("-fx-background-color: #5a2020; -fx-text-fill: #ff8080; -fx-font-size: 12; -fx-padding: 0 4; -fx-cursor: hand;"));
+        btn.setOnMouseExited(e -> btn.setStyle("-fx-background-color: transparent; -fx-text-fill: " + TEXT + "; -fx-font-size: 12; -fx-padding: 0 4; -fx-cursor: hand;"));
+        btn.setOnAction(e -> { if (onClose != null) onClose.run(); setVisible(false); });
+        return btn;
     }
     
-    public void setOnClose(Runnable callback) {
-        this.onClose = callback;
-    }
-
-    public Inventory getInventory() {
-        return inventory;
+    private void setupDragging(HBox bar) {
+        bar.setOnMousePressed(e -> {
+            if (getParent() instanceof Pane) {
+                dragStartX = e.getSceneX() - getLayoutX();
+                dragStartY = e.getSceneY() - getLayoutY();
+                isDragging = true;
+                toFront();
+            }
+        });
+        bar.setOnMouseDragged(e -> {
+            if (isDragging && getParent() instanceof Pane) {
+                Pane parent = (Pane) getParent();
+                setLayoutX(Math.max(0, Math.min(e.getSceneX() - dragStartX, parent.getWidth() - getWidth())));
+                setLayoutY(Math.max(0, Math.min(e.getSceneY() - dragStartY, parent.getHeight() - getHeight())));
+            }
+        });
+        bar.setOnMouseReleased(e -> isDragging = false);
     }
     
     public void refresh() {
-        render();
+        for (int i = 0; i < slots.length; i++) {
+            if (slots[i] != null) {
+                renderSlot(slots[i], i);
+            }
+        }
+        
+        // Update info if item selected
+        if (selectedSlot >= 0 && selectedSlot < inventory.getSize()) {
+            ItemStack stack = inventory.getSlot(selectedSlot);
+            updateItemInfo(stack);
+        }
+    }
+    
+    public void setOnClose(Runnable callback) { this.onClose = callback; }
+    
+    /**
+     * Callback when an item is equipped from inventory.
+     */
+    private java.util.function.Consumer<Item> onItemEquipped;
+    
+    public void setOnItemEquipped(java.util.function.Consumer<Item> callback) { 
+        this.onItemEquipped = callback; 
+    }
+    
+    /**
+     * Called when an item is equipped - notifies listeners.
+     */
+    protected void notifyItemEquipped(Item item) {
+        if (onItemEquipped != null) {
+            onItemEquipped.accept(item);
+        }
     }
 }

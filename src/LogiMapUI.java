@@ -9,13 +9,15 @@ import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
-import javafx.scene.shape.Rectangle;
 import javafx.stage.Stage;
 import javafx.util.Duration;
+
+// Game systems
 
 /**
  * Main UI class for LogiMap - Logistics & Supply Chain Simulator.
@@ -31,11 +33,13 @@ public class LogiMapUI extends Application {
     private NewsTicker newsTicker;
     private InteractionMenu interactionMenu;
     private VBox menuPanel; // The sliding menu panel
+    private VBox menuContentArea; // The area for menu content (can be swapped)
     private Button toggleMenuButton;
     private boolean menuVisible = true;
     private boolean isAnimating = false;
     private static final double MENU_WIDTH = 270;
     private static final double ANIMATION_DURATION = 300;
+    private Stage primaryStage; // Reference to main window
     
     // World data
     private DemoWorld world;
@@ -44,9 +48,24 @@ public class LogiMapUI extends Application {
     // Player and gameplay
     private PlayerSprite player;
     private TownInteractionMenu townInteractionMenu;
+    private TavernRecruitmentPanel tavernRecruitmentPanel;
+    private MarketplaceUI marketplaceUI;
+    private EconomySystem economySystem;
     private LoreDialogue loreDialogue;
     private AnimationTimer gameLoop;
     private long lastUpdateTime = 0;
+    
+    // Floating panels layer for draggable windows
+    private Pane floatingPanelLayer;
+    private FloatingPanel characterFloatingPanel;
+    private FloatingPanel gearFloatingPanel;
+    private FloatingPanel inventoryFloatingPanel;
+    
+    // NPC interaction and social systems
+    private NPCDialogueMenu npcDialogueMenu;
+    private RelationshipManager relationshipManager;
+    private SocialPanel socialPanel;
+    private FloatingPanel socialFloatingPanel;
     
     // Callback for returning to main menu
     private Runnable onReturnToMenu;
@@ -81,6 +100,7 @@ public class LogiMapUI extends Application {
     
     @Override
     public void start(Stage primaryStage) {
+        this.primaryStage = primaryStage; // Store reference
         mainLayout = new BorderPane();
         mainLayout.setStyle("-fx-background-color: " + DARK_BG + ";");
         
@@ -97,6 +117,9 @@ public class LogiMapUI extends Application {
         // Configure stage
         primaryStage.setTitle("LogiMap - " + worldName);
         primaryStage.setScene(scene);
+        primaryStage.setResizable(true);
+        primaryStage.setMinWidth(1024);
+        primaryStage.setMinHeight(768);
         primaryStage.setMaximized(true);
         primaryStage.setOnShown(e -> mapCanvas.onStageReady());
         primaryStage.show();
@@ -106,6 +129,7 @@ public class LogiMapUI extends Application {
      * Starts the UI within an existing root pane.
      */
     public void startWithRoot(Stage primaryStage, StackPane root) {
+        this.primaryStage = primaryStage; // Store reference
         mainLayout = new BorderPane();
         mainLayout.setStyle("-fx-background-color: " + DARK_BG + ";");
         
@@ -168,8 +192,11 @@ public class LogiMapUI extends Application {
             
             // Set up town interaction callback
             mapCanvas.setOnTownInteraction(this::handleTownInteraction);
+            mapCanvas.setOnNPCInteraction(this::handleNPCInteraction);
         } else {
             mapCanvas = new MapCanvas();
+            mapCanvas.setOnTownInteraction(this::handleTownInteraction);
+            mapCanvas.setOnNPCInteraction(this::handleNPCInteraction);
         }
         javafx.scene.canvas.Canvas canvas = mapCanvas.getCanvas();
         
@@ -278,8 +305,23 @@ public class LogiMapUI extends Application {
     /**
      * Handles right-click interaction with a town.
      * Shows lore dialogue first, then town menu if player chooses to enter.
+     * If instantTownMenu setting is enabled, skips the dialogue.
      */
     private void handleTownInteraction(Town town) {
+        // Check if instant town menu is enabled in settings
+        if (GameSettings.getInstance().isInstantTownMenu()) {
+            // Skip dialogue and go straight to town menu
+            if (townInteractionMenu != null) {
+                townInteractionMenu.showForTown(town, player);
+                // Update economic info (treasury & warehouse) for the town
+                if (mapCanvas != null && mapCanvas.getNPCManager() != null) {
+                    SettlementPopulation pop = mapCanvas.getNPCManager().getPopulationForTown(town);
+                    townInteractionMenu.updateEconomicInfo(pop, economySystem);
+                }
+            }
+            return;
+        }
+        
         if (loreDialogue != null && player != null) {
             // Generate a lord name for castles (major towns)
             String lordName = generateLordName(town.getName());
@@ -291,6 +333,10 @@ public class LogiMapUI extends Application {
                         // Player chose to enter - show town menu
                         if (townInteractionMenu != null) {
                             townInteractionMenu.showForTown(town, player);
+                            if (mapCanvas != null && mapCanvas.getNPCManager() != null) {
+                                SettlementPopulation pop = mapCanvas.getNPCManager().getPopulationForTown(town);
+                                townInteractionMenu.updateEconomicInfo(pop, economySystem);
+                            }
                         }
                     },
                     () -> {
@@ -305,6 +351,10 @@ public class LogiMapUI extends Application {
                         // Player chose to enter - show town menu
                         if (townInteractionMenu != null) {
                             townInteractionMenu.showForTown(town, player);
+                            if (mapCanvas != null && mapCanvas.getNPCManager() != null) {
+                                SettlementPopulation pop = mapCanvas.getNPCManager().getPopulationForTown(town);
+                                townInteractionMenu.updateEconomicInfo(pop, economySystem);
+                            }
                         }
                     },
                     () -> {
@@ -314,6 +364,32 @@ public class LogiMapUI extends Application {
                 );
             }
         }
+    }
+
+    private void handleNPCInteraction(NPC npc) {
+        if (npc == null) return;
+        
+        // Initialize relationship manager if needed
+        if (relationshipManager == null) {
+            relationshipManager = new RelationshipManager();
+        }
+        
+        // Show proper dialogue menu instead of just news ticker
+        if (npcDialogueMenu == null) {
+            npcDialogueMenu = new NPCDialogueMenu(relationshipManager);
+            npcDialogueMenu.setPlayer(player);
+            if (mapCanvas != null) {
+                npcDialogueMenu.setGameTime(mapCanvas.getGameTime());
+            }
+            npcDialogueMenu.setOnClose(closedNpc -> npcDialogueMenu.setVisible(false));
+            centerStack.getChildren().add(npcDialogueMenu);
+        }
+        
+        // Record the interaction with relationship manager
+        relationshipManager.recordInteraction(npc);
+        
+        // Show dialogue
+        npcDialogueMenu.show(npc);
     }
     
     /**
@@ -335,28 +411,16 @@ public class LogiMapUI extends Application {
     }
     
     /**
-     * Initializes the bottom section with news ticker and controls.
+     * Initializes the bottom section with news ticker.
+     * The news ticker includes its own integrated log expansion button.
      */
     private void initializeBottomSection() {
-        HBox bottomSection = new HBox(10);
-        bottomSection.setPadding(new Insets(5, 10, 5, 10));
-        bottomSection.setAlignment(Pos.CENTER_LEFT);
-        bottomSection.setStyle(
-            "-fx-background-color: " + MEDIUM_BG + ";" +
-            "-fx-border-color: " + ACCENT_COLOR + ";" +
-            "-fx-border-width: 1 0 0 0;"
-        );
-        
-        // News ticker
+        // News ticker with integrated log button
         newsTicker = new NewsTicker();
         HBox.setHgrow(newsTicker.getContainer(), Priority.ALWAYS);
         
-        // Log viewer button
-        Button logButton = createStyledButton("LOG", LIGHT_BG, TEXT_COLOR);
-        logButton.setOnAction(e -> openLogViewer());
-        
-        bottomSection.getChildren().addAll(newsTicker.getContainer(), logButton);
-        mainLayout.setBottom(bottomSection);
+        // Set the news ticker as the bottom section directly
+        mainLayout.setBottom(newsTicker.getContainer());
     }
     
     /**
@@ -368,6 +432,7 @@ public class LogiMapUI extends Application {
         
         // Wire up control handlers
         wireControlHandlers();
+        wireDevTools();
         
         // Create the themed menu panel
         menuPanel = createThemedMenuPanel();
@@ -375,34 +440,104 @@ public class LogiMapUI extends Application {
         // Position on left side
         StackPane.setAlignment(menuPanel, Pos.CENTER_LEFT);
         
+        // Create economy system
+        economySystem = new EconomySystem(world.getSeed());
+        // Register all towns
+        for (Town town : world.getTowns()) {
+            economySystem.registerTown(town);
+        }
+
+        // Provide economy reference to NPC manager for deliveries
+        if (mapCanvas != null && mapCanvas.getNPCManager() != null) {
+            mapCanvas.getNPCManager().setEconomySystem(economySystem);
+        }
+        
+        // Create marketplace UI
+        marketplaceUI = new MarketplaceUI();
+        marketplaceUI.setOnClose(() -> {
+            // Refresh town menu when closing marketplace
+            if (townInteractionMenu.isShowing()) {
+                // Keep town menu visible
+            }
+        });
+        marketplaceUI.setOnReturnToTown(() -> {
+            // Return to town interaction menu
+            Town town = marketplaceUI.getCurrentTown();
+            if (town != null && player != null) {
+                townInteractionMenu.showForTown(town, player);
+                if (mapCanvas != null && mapCanvas.getNPCManager() != null) {
+                    SettlementPopulation pop = mapCanvas.getNPCManager().getPopulationForTown(town);
+                    townInteractionMenu.updateEconomicInfo(pop, economySystem);
+                }
+            }
+        });
+        
+        // Create tavern recruitment panel
+        tavernRecruitmentPanel = new TavernRecruitmentPanel();
+        tavernRecruitmentPanel.setOnClose(() -> {
+            // Return to town interaction menu when closing recruitment
+            Town town = tavernRecruitmentPanel.getCurrentTown();
+            if (town != null && player != null) {
+                townInteractionMenu.showForTown(town, player);
+            }
+        });
+        tavernRecruitmentPanel.setOnHire((npc, success) -> {
+            // Handle hire result
+            if (success) {
+                System.out.println("Hired: " + npc.getName());
+            }
+        });
+        
         // Create town interaction menu
         townInteractionMenu = new TownInteractionMenu();
         townInteractionMenu.setOnTrade(() -> {
-            System.out.println("Opening marketplace...");
-            // TODO: Implement marketplace
-        });
-        townInteractionMenu.setOnRest(() -> {
-            if (player != null && player.getGold() >= 10) {
-                player.addGold(-10);
-                player.setHealth(player.getMaxHealth());
-                System.out.println("Rested at inn. Health restored!");
+            // Open marketplace
+            Town town = townInteractionMenu.getCurrentTown();
+            if (town != null) {
+                townInteractionMenu.close();
+                marketplaceUI.show(town, player, economySystem);
             }
         });
+        townInteractionMenu.setOnRest(() -> {
+            handleResting();
+        });
         townInteractionMenu.setOnRecruit(() -> {
-            System.out.println("Opening recruitment...");
-            // TODO: Implement recruitment
+            // Open tavern recruitment panel
+            Town town = townInteractionMenu.getCurrentTown();
+            if (town != null && player != null) {
+                townInteractionMenu.close();
+                tavernRecruitmentPanel.showForTown(town, player);
+            }
         });
         townInteractionMenu.setOnViewInfo(() -> {
             System.out.println("Viewing town info...");
             // TODO: Implement town info view
         });
+        townInteractionMenu.setOnWarehouse(() -> {
+            Town town = townInteractionMenu.getCurrentTown();
+            if (town != null) {
+                townInteractionMenu.close();
+                showWarehouseUI(town);
+            }
+        });
         
         // Create lore dialogue for story interactions
         loreDialogue = new LoreDialogue();
         
+        // Create floating panel layer for draggable windows (inventory, gear, etc.)
+        floatingPanelLayer = new Pane();
+        floatingPanelLayer.setPickOnBounds(false); // Let clicks pass through empty areas
+        floatingPanelLayer.setMouseTransparent(false);
+        
+        // Initialize drag overlay system for ghost sprites when dragging items
+        DragOverlay.initialize(floatingPanelLayer);
+        
+        // Initialize floating panels (hidden by default)
+        initializeFloatingPanels();
+        
         // Add to the center stack (overlays the map)
-        // Order matters: menu panel, town interaction, then lore dialogue on top
-        centerStack.getChildren().addAll(menuPanel, townInteractionMenu, loreDialogue);
+        // Order matters: menu panel, town interaction, marketplace, recruitment, lore dialogue, then floating panels on top
+        centerStack.getChildren().addAll(menuPanel, townInteractionMenu, marketplaceUI, tavernRecruitmentPanel, loreDialogue, floatingPanelLayer);
     }
     
     /**
@@ -421,9 +556,9 @@ public class LogiMapUI extends Application {
         contentWithToggle.setPickOnBounds(false);
         
         // Left side: the actual menu content
-        VBox menuContent = new VBox(0);
-        menuContent.setPrefWidth(MENU_WIDTH);
-        menuContent.setMaxWidth(MENU_WIDTH);
+        menuContentArea = new VBox(0);
+        menuContentArea.setPrefWidth(MENU_WIDTH);
+        menuContentArea.setMaxWidth(MENU_WIDTH);
         
         // Header with title
         HBox header = new HBox();
@@ -460,7 +595,7 @@ public class LogiMapUI extends Application {
         interactionContainer.setMaxWidth(MENU_WIDTH);
         VBox.setVgrow(interactionContainer, Priority.ALWAYS);
         
-        menuContent.getChildren().addAll(header, interactionContainer);
+        menuContentArea.getChildren().addAll(header, interactionContainer);
         
         // Right side: toggle button
         toggleMenuButton = new Button("◀");
@@ -486,7 +621,7 @@ public class LogiMapUI extends Application {
         toggleWrapper.setPadding(new Insets(50, 0, 0, 0));
         toggleWrapper.setPickOnBounds(false);
         
-        contentWithToggle.getChildren().addAll(menuContent, toggleWrapper);
+        contentWithToggle.getChildren().addAll(menuContentArea, toggleWrapper);
         panel.getChildren().add(contentWithToggle);
         
         return panel;
@@ -526,11 +661,6 @@ public class LogiMapUI extends Application {
      * Wires up control handlers from the interaction menu to map canvas.
      */
     private void wireControlHandlers() {
-        // Grid control handlers
-        interactionMenu.setGridControlHandlers(
-            factor -> mapCanvas.setGridBrightness(factor),
-            () -> mapCanvas.toggleGridNumbers()
-        );
         
         // Filter handlers
         interactionMenu.setFilterHandlers(
@@ -538,6 +668,9 @@ public class LogiMapUI extends Application {
             () -> mapCanvas.setMapFilter(new TopographicalFilter()),
             () -> mapCanvas.setMapFilter(new ResourceHeatmapFilter(mapCanvas.getWorld().getResourceMap()))
         );
+
+        // Heatmap toggle observer: show large resource icons when heatmap is active
+        interactionMenu.setHeatmapToggleHandler(selected -> mapCanvas.setShowLargeResourceIcons(selected));
         
         // Save/Load handlers
         interactionMenu.setSaveLoadHandlers(
@@ -558,10 +691,34 @@ public class LogiMapUI extends Application {
             () -> openJournal()
         );
         
+        // Party handler
+        interactionMenu.setPartyHandler(() -> openPartyUI());
+        
         // Update wallet display
         if (player != null) {
             interactionMenu.updateWallet(player.getCurrency());
         }
+    }
+
+    /**
+     * Wires developer tool shortcuts for quick testing/cheats.
+     */
+    private void wireDevTools() {
+        interactionMenu.setDevToolHandlers(
+            () -> {
+                if (player != null) {
+                    player.getCurrency().addGold(500);
+                    interactionMenu.updateWallet(player.getCurrency());
+                }
+            },
+            () -> {
+                if (mapCanvas != null) {
+                    mapCanvas.refillEnergyCheat();
+                }
+            },
+            enabled -> GameSettings.getInstance().setTeleportCheatEnabled(enabled)
+        );
+        interactionMenu.syncTeleportCheat(GameSettings.getInstance().isTeleportCheatEnabled());
     }
     
     /**
@@ -601,6 +758,8 @@ public class LogiMapUI extends Application {
             
             // Reinitialize map with new world
             mapCanvas = new MapCanvas(world);
+            mapCanvas.setOnTownInteraction(this::handleTownInteraction);
+            mapCanvas.setOnNPCInteraction(this::handleNPCInteraction);
             javafx.scene.canvas.Canvas canvas = mapCanvas.getCanvas();
             
             StackPane mapContainer = new StackPane(canvas);
@@ -648,40 +807,6 @@ public class LogiMapUI extends Application {
     }
     
     /**
-     * Opens the notification log viewer window.
-     */
-    private void openLogViewer() {
-        Stage logStage = new Stage();
-        logStage.setTitle("Notification Log");
-        
-        VBox layout = new VBox(10);
-        layout.setPadding(new Insets(15));
-        layout.setStyle("-fx-background-color: " + DARK_BG + ";");
-        
-        Label title = new Label("Notification History");
-        title.setStyle(
-            "-fx-text-fill: " + TEXT_COLOR + ";" +
-            "-fx-font-size: 16px;" +
-            "-fx-font-weight: bold;"
-        );
-        
-        TextArea logArea = new TextArea(newsTicker.getLogHistory());
-        logArea.setEditable(false);
-        logArea.setStyle(
-            "-fx-control-inner-background: " + MEDIUM_BG + ";" +
-            "-fx-text-fill: " + TEXT_COLOR + ";"
-        );
-        VBox.setVgrow(logArea, Priority.ALWAYS);
-        
-        Button closeButton = createStyledButton("Close", ACCENT_COLOR, "white");
-        closeButton.setOnAction(e -> logStage.close());
-        
-        layout.getChildren().addAll(title, logArea, closeButton);
-        logStage.setScene(new Scene(layout, 500, 400));
-        logStage.show();
-    }
-    
-    /**
      * Creates a styled button with consistent appearance.
      */
     private Button createStyledButton(String text, String bgColor, String textColor) {
@@ -704,11 +829,18 @@ public class LogiMapUI extends Application {
             case "Map":
                 menuPanel.setVisible(true);
                 mapCanvas.setMapMode("Map");
+                closeSocialPanel();
                 break;
                 
             case "Region":
                 menuPanel.setVisible(true);
                 mapCanvas.setMapMode("Region");
+                closeSocialPanel();
+                break;
+                
+            case "Social":
+                menuPanel.setVisible(true);
+                openSocialPanel();
                 break;
                 
             default:
@@ -717,113 +849,269 @@ public class LogiMapUI extends Application {
         }
     }
     
-    // Character Sheet UI reference
-    private CharacterSheet characterSheetUI;
-    private GearSheet gearSheetUI;
-
     /**
-     * Opens the character sheet window (stats and attributes).
+     * Opens the social panel showing known NPCs.
      */
-    private void openCharacterSheet() {
-        if (player == null) return;
-        
-        if (characterSheetUI == null) {
-            characterSheetUI = new CharacterSheet(player);
-            characterSheetUI.setOnClose(() -> characterSheetUI.setVisible(false));
+    private void openSocialPanel() {
+        // Initialize relationship manager if needed
+        if (relationshipManager == null) {
+            relationshipManager = new RelationshipManager();
         }
         
-        // Update and show
-        characterSheetUI.refresh();
-        
-        if (!centerStack.getChildren().contains(characterSheetUI)) {
-            centerStack.getChildren().add(characterSheetUI);
-        }
-        
-        // Position to the left of center
-        double x = (centerStack.getWidth() - characterSheetUI.getPrefWidth()) / 2 - 150;
-        double y = (centerStack.getHeight() - characterSheetUI.getPrefHeight()) / 2;
-        characterSheetUI.setLayoutX(Math.max(10, x));
-        characterSheetUI.setLayoutY(Math.max(10, y));
-        
-        characterSheetUI.setVisible(true);
-        characterSheetUI.toFront();
-    }
-    
-    /**
-     * Opens the gear/equipment sheet window.
-     */
-    private void openGearSheet() {
-        if (player == null) return;
-        
-        if (gearSheetUI == null) {
-            gearSheetUI = new GearSheet(player);
-            gearSheetUI.setOnClose(() -> gearSheetUI.setVisible(false));
-            gearSheetUI.setOnGearChanged(() -> {
-                if (characterSheetUI != null) characterSheetUI.refresh();
+        // Create social panel if needed
+        if (socialPanel == null) {
+            socialPanel = new SocialPanel(relationshipManager);
+            socialPanel.setOnNPCSelected(npc -> {
+                // Show dialogue when clicking an NPC in the list
+                if (npc != null && npcDialogueMenu != null) {
+                    npcDialogueMenu.show(npc);
+                }
             });
         }
         
-        // Update and show
-        gearSheetUI.refresh();
-        
-        if (!centerStack.getChildren().contains(gearSheetUI)) {
-            centerStack.getChildren().add(gearSheetUI);
-        }
-        
-        // Position to the right of center
-        double x = (centerStack.getWidth() - gearSheetUI.getPrefWidth()) / 2 + 150;
-        double y = (centerStack.getHeight() - gearSheetUI.getPrefHeight()) / 2;
-        gearSheetUI.setLayoutX(Math.max(10, x));
-        gearSheetUI.setLayoutY(Math.max(10, y));
-        
-        gearSheetUI.setVisible(true);
-        gearSheetUI.toFront();
+        // Show social panel in the side menu
+        showInSidePanel(socialPanel);
     }
-
-    // Inventory UI reference
-    private InventoryUI inventoryUI;
-    private DraggableWindow inventoryWindow;
+    
+    /**
+     * Closes the social panel and returns to controls.
+     */
+    private void closeSocialPanel() {
+        if (activeSidePanel == socialPanel) {
+            closeSidePanel();
+        }
+    }
+    
+    // Character Sheet UI reference
+    private CharacterSheet characterSheetUI;
+    private GearSheet gearSheetUI;
+    private VBox activeSidePanel; // Currently shown side panel content
 
     /**
-     * Opens the inventory window.
+     * Initializes floating panels for character, gear, and inventory.
      */
-    private void openInventory() {
+    private void initializeFloatingPanels() {
         if (player == null) return;
         
-        if (inventoryWindow == null) {
-            inventoryUI = new InventoryUI(player.getInventory());
-            inventoryUI.setOnClose(() -> inventoryWindow.setVisible(false));
+        // Character sheet floating panel
+        characterSheetUI = new CharacterSheet(player);
+        characterFloatingPanel = new FloatingPanel("Character", characterSheetUI);
+        characterFloatingPanel.setVisible(false);
+        characterFloatingPanel.setLayoutX(100);
+        characterFloatingPanel.setLayoutY(100);
+        floatingPanelLayer.getChildren().add(characterFloatingPanel);
+        
+        // Gear sheet floating panel
+        gearSheetUI = new GearSheet(player);
+        gearSheetUI.setOnGearChanged(() -> {
+            if (characterSheetUI != null) characterSheetUI.refresh();
+        });
+        gearFloatingPanel = new FloatingPanel("Equipment", gearSheetUI);
+        gearFloatingPanel.setVisible(false);
+        gearFloatingPanel.setLayoutX(350);
+        gearFloatingPanel.setLayoutY(100);
+        floatingPanelLayer.getChildren().add(gearFloatingPanel);
+        
+        // Inventory floating panel
+        inventoryUI = new InventoryUI(player.getInventory(), player);
+        inventoryUI.setOnItemEquipped(item -> {
+            // Refresh gear when item is equipped
+            if (gearSheetUI != null) gearSheetUI.refresh();
+            if (characterSheetUI != null) characterSheetUI.refresh();
+        });
+        inventoryFloatingPanel = new FloatingPanel("Inventory", inventoryUI);
+        inventoryFloatingPanel.setVisible(false);
+        inventoryFloatingPanel.setLayoutX(620);
+        inventoryFloatingPanel.setLayoutY(100);
+        floatingPanelLayer.getChildren().add(inventoryFloatingPanel);
+    }
+    
+    // Party UI and panel
+    private PartyUI partyUI;
+    private FloatingPanel partyFloatingPanel;
+    
+    /**
+     * Opens the party management UI as a floating panel.
+     */
+    private void openPartyUI() {
+        if (player == null) return;
+        
+        // Initialize party UI if needed
+        if (partyUI == null) {
+            partyUI = new PartyUI(player.getParty(), player);
             
-            // Wrap in draggable window
-            inventoryWindow = new DraggableWindow("🎒 Inventory", 
-                inventoryUI.getPrefWidth() + 20, inventoryUI.getPrefHeight() + 50);
-            inventoryWindow.setContent(inventoryUI);
-            inventoryWindow.setOnClose(() -> inventoryWindow.setVisible(false));
+            // Create floating panel - PartyUI extends VBox so we can add it directly
+            partyFloatingPanel = new FloatingPanel("⚔ Party Management", partyUI);
+            partyFloatingPanel.setLayoutX(100);
+            partyFloatingPanel.setLayoutY(100);
+            floatingPanelLayer.getChildren().add(partyFloatingPanel);
         }
         
-        // Refresh and show
-        inventoryUI.refresh();
+        if (partyFloatingPanel.isShowing()) {
+            partyFloatingPanel.hide();
+        } else {
+            partyFloatingPanel.show();
+        }
+    }
+
+    /**
+     * Opens the character sheet as a floating panel.
+     */
+    private void openCharacterSheet() {
+        if (player == null || characterFloatingPanel == null) return;
         
-        if (!centerStack.getChildren().contains(inventoryWindow)) {
-            centerStack.getChildren().add(inventoryWindow);
+        if (characterFloatingPanel.isShowing()) {
+            // Toggle off - hide the panel
+            characterFloatingPanel.hide();
+        } else {
+            characterSheetUI.refresh();
+            characterFloatingPanel.show();
+        }
+    }
+    
+    /**
+     * Opens the gear/equipment sheet as a floating panel.
+     */
+    private void openGearSheet() {
+        if (player == null || gearFloatingPanel == null) return;
+        
+        if (gearFloatingPanel.isShowing()) {
+            // Toggle off - hide the panel
+            gearFloatingPanel.hide();
+        } else {
+            gearSheetUI.refresh();
+            gearFloatingPanel.show();
+        }
+    }
+
+    /**
+     * Opens the inventory as a floating panel.
+     */
+    private void openInventory() {
+        if (player == null || inventoryFloatingPanel == null) return;
+        
+        if (inventoryFloatingPanel.isShowing()) {
+            // Toggle off - hide the panel
+            inventoryFloatingPanel.hide();
+        } else {
+            inventoryUI.refresh();
+            inventoryFloatingPanel.show();
+        }
+    }
+    
+    // Inventory UI reference (moved to floating panels)
+    private InventoryUI inventoryUI;
+    
+    /**
+     * Shows a panel in the side menu area, replacing the interaction menu.
+     */
+    private void showInSidePanel(VBox panel) {
+        // Store the active panel
+        activeSidePanel = panel;
+        
+        // Make sure menu is visible
+        if (!menuVisible) {
+            toggleMenu();
         }
         
-        // Position below center
-        double x = (centerStack.getWidth() - inventoryWindow.getPrefWidth()) / 2;
-        double y = (centerStack.getHeight() - inventoryWindow.getPrefHeight()) / 2 + 100;
-        inventoryWindow.setLayoutX(Math.max(10, x));
-        inventoryWindow.setLayoutY(Math.max(10, y));
+        // Replace the content area (not the whole menu structure)
+        menuContentArea.getChildren().clear();
         
-        inventoryWindow.setVisible(true);
-        inventoryWindow.toFront();
+        // Create header for the side panel
+        HBox header = new HBox();
+        header.setAlignment(Pos.CENTER_LEFT);
+        header.setPadding(new Insets(8, 10, 8, 10));
+        header.setMinHeight(42);
+        header.setStyle(
+            "-fx-background-color: linear-gradient(to bottom, #3d2f1f, " + MENU_HEADER + ");" +
+            "-fx-border-color: " + MENU_BORDER + ";" +
+            "-fx-border-width: 3 3 0 0;" +
+            "-fx-border-radius: 0 12 0 0;" +
+            "-fx-background-radius: 0 12 0 0;"
+        );
+        
+        // Back button
+        Button backBtn = new Button("← Back");
+        backBtn.setStyle(
+            "-fx-background-color: #2a1f10;" +
+            "-fx-text-fill: #c4a574;" +
+            "-fx-font-size: 11px;" +
+            "-fx-padding: 5 10;" +
+            "-fx-cursor: hand;" +
+            "-fx-background-radius: 4;"
+        );
+        backBtn.setOnAction(e -> closeSidePanel());
+        header.getChildren().add(backBtn);
+        
+        // Content wrapper
+        VBox contentWrapper = new VBox(0);
+        contentWrapper.setStyle(
+            "-fx-background-color: linear-gradient(to bottom, " + MENU_BG + ", #1f1a10);" +
+            "-fx-border-color: " + MENU_BORDER + ";" +
+            "-fx-border-width: 0 3 3 0;" +
+            "-fx-border-radius: 0 0 12 0;" +
+            "-fx-background-radius: 0 0 12 0;" +
+            "-fx-padding: 5;"
+        );
+        contentWrapper.getChildren().add(panel);
+        VBox.setVgrow(panel, Priority.ALWAYS);
+        VBox.setVgrow(contentWrapper, Priority.ALWAYS);
+        
+        menuContentArea.getChildren().addAll(header, contentWrapper);
+    }
+    
+    /**
+     * Closes the side panel and returns to the interaction menu.
+     */
+    private void closeSidePanel() {
+        activeSidePanel = null;
+        
+        // Restore the original menu content
+        menuContentArea.getChildren().clear();
+        
+        // Recreate the header
+        HBox header = new HBox();
+        header.setAlignment(Pos.CENTER);
+        header.setPadding(new Insets(10, 15, 10, 15));
+        header.setMinHeight(42);
+        header.setStyle(
+            "-fx-background-color: linear-gradient(to bottom, #3d2f1f, " + MENU_HEADER + ");" +
+            "-fx-border-color: " + MENU_BORDER + ";" +
+            "-fx-border-width: 3 3 0 0;" +
+            "-fx-border-radius: 0 12 0 0;" +
+            "-fx-background-radius: 0 12 0 0;"
+        );
+        
+        Label titleLabel = new Label("⚔  CONTROLS  ⚔");
+        titleLabel.setStyle(
+            "-fx-text-fill: #c4a574;" +
+            "-fx-font-size: 13px;" +
+            "-fx-font-weight: bold;"
+        );
+        header.getChildren().add(titleLabel);
+        
+        // Restore the interaction menu container
+        VBox interactionContainer = interactionMenu.getContainer();
+        interactionContainer.setStyle(
+            "-fx-background-color: linear-gradient(to bottom, " + MENU_BG + ", #1f1a10);" +
+            "-fx-border-color: " + MENU_BORDER + ";" +
+            "-fx-border-width: 0 3 3 0;" +
+            "-fx-border-radius: 0 0 12 0;" +
+            "-fx-background-radius: 0 0 12 0;" +
+            "-fx-padding: 5 0 10 0;"
+        );
+        VBox.setVgrow(interactionContainer, Priority.ALWAYS);
+        
+        menuContentArea.getChildren().addAll(header, interactionContainer);
     }
     
     /**
      * Opens the relationships panel.
      */
     private void openRelationships() {
-        // TODO: Implement relationships panel
-        newsTicker.addNewsItem("Relationships panel coming soon!");
+        // Switch to Social tab which shows the relationships panel
+        tabManager.getTabBar();  // Get access to tab bar
+        switchTab("Social");
     }
     
     /**
@@ -856,6 +1144,115 @@ public class LogiMapUI extends Application {
      */
     public void setOnReturnToMenu(Runnable callback) {
         this.onReturnToMenu = callback;
+    }
+    
+    /**
+     * Handles resting at a town.
+     * Free in villages, costs gold in cities.
+     * Restores energy and progresses time.
+     */
+    private void handleResting() {
+        if (player == null || mapCanvas == null) return;
+        
+        Town town = townInteractionMenu.getCurrentTown();
+        if (town == null) return;
+        
+        PlayerEnergy energy = mapCanvas.getPlayerEnergy();
+        GameTime gameTime = mapCanvas.getGameTime();
+        
+        if (energy == null || gameTime == null) return;
+        
+        // Check if already at full energy
+        if (energy.getCurrentEnergy() >= energy.getMaxEnergy()) {
+            newsTicker.addNewsItem("You are already fully rested!");
+            return;
+        }
+        
+        // Get rest location type
+        PlayerEnergy.RestLocation restLocation = town.getRestLocation();
+        int cost = restLocation.getCost();
+        
+        // Check if player can afford
+        if (cost > 0 && player.getGold() < cost) {
+            newsTicker.addNewsItem("Not enough gold! You need " + cost + " gold to rest here.");
+            return;
+        }
+        
+        // Pay cost
+        if (cost > 0) {
+            player.addGold(-cost);
+        }
+        
+        // Calculate time and energy restoration
+        if (restLocation.takesTime()) {
+            // Gradual rest - advance time and restore energy
+            double energyNeeded = energy.getMaxEnergy() - energy.getCurrentEnergy();
+            double ratePerMin = restLocation.getRecoveryPerMinute();
+            int minutesNeeded = (int) Math.ceil(energyNeeded / ratePerMin);
+            
+            // Advance game time
+            gameTime.advanceTime(minutesNeeded);
+            
+            // Restore energy
+            energy.fullyRestore();
+            
+            int hours = minutesNeeded / 60;
+            int mins = minutesNeeded % 60;
+            String timeStr = hours > 0 ? hours + " hours " + mins + " minutes" : mins + " minutes";
+            
+            if (cost > 0) {
+                newsTicker.addNewsItem("Rested at " + restLocation.getDisplayName() + " for " + timeStr + ". Energy restored! (-" + cost + " gold)");
+            } else {
+                newsTicker.addNewsItem("Rested at " + restLocation.getDisplayName() + " for " + timeStr + ". Energy restored!");
+            }
+        } else {
+            // Instant restore (city inn)
+            energy.fullyRestore();
+            newsTicker.addNewsItem("Rested at " + restLocation.getDisplayName() + ". Fully restored! (-" + cost + " gold)");
+        }
+        
+        // Close town menu
+        townInteractionMenu.close();
+    }
+    
+    /**
+     * Shows the warehouse UI for a specific town.
+     */
+    private void showWarehouseUI(Town town) {
+        if (town == null) return;
+        
+        TownWarehouse warehouse = town.getWarehouse();
+        WarehouseUI warehouseUI = new WarehouseUI(warehouse, player);
+        
+        warehouseUI.setOnClose(() -> {
+            floatingPanelLayer.getChildren().remove(warehouseUI);
+        });
+        
+        warehouseUI.setOnInventoryChanged(() -> {
+            // Refresh inventory UI if visible
+            if (inventoryUI != null) {
+                inventoryUI.refresh();
+            }
+            // Update wallet display
+            interactionMenu.updateWallet(player.getCurrency());
+        });
+        
+        // Position in center
+        warehouseUI.setLayoutX((floatingPanelLayer.getWidth() - 350) / 2);
+        warehouseUI.setLayoutY((floatingPanelLayer.getHeight() - 400) / 2);
+        
+        // Make draggable
+        final double[] dragOffset = new double[2];
+        warehouseUI.setOnMousePressed(e -> {
+            dragOffset[0] = e.getSceneX() - warehouseUI.getLayoutX();
+            dragOffset[1] = e.getSceneY() - warehouseUI.getLayoutY();
+        });
+        warehouseUI.setOnMouseDragged(e -> {
+            warehouseUI.setLayoutX(e.getSceneX() - dragOffset[0]);
+            warehouseUI.setLayoutY(e.getSceneY() - dragOffset[1]);
+        });
+        
+        floatingPanelLayer.getChildren().add(warehouseUI);
     }
     
     /**

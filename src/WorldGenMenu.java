@@ -29,6 +29,7 @@ public class WorldGenMenu extends StackPane {
     private static final String LIGHT_BG = "#3a3a3a";
     private static final String ACCENT_COLOR = "#4a9eff";
     private static final String TEXT_COLOR = "#e0e0e0";
+    private static final String TEXT_DIM = "#888888";
     private static final String PANEL_BORDER = "#404040";
     
     // World names for random generation
@@ -193,8 +194,43 @@ public class WorldGenMenu extends StackPane {
         return section;
     }
     
+    // Sliders for village/city settings
+    private Slider villageCountSlider;
+    private Slider cityCountSlider;
+    private Slider agriculturalSlider;
+    private Slider pastoralSlider;
+    private Slider lumberSlider;
+    private Slider miningSlider;
+    private Slider fishingSlider;
+    
+    // Biome settings
+    private Slider forestCoverSlider;
+    private Slider desertCoverSlider;
+    private Slider mountainCoverSlider;
+    private Slider waterCoverSlider;
+    
+    // Labels for village type percentages
+    private Label agriculturalLabel;
+    private Label pastoralLabel;
+    private Label lumberLabel;
+    private Label miningLabel;
+    private Label fishingLabel;
+    private Label totalPercentLabel;
+    
+    // Labels for biome percentages
+    private Label forestLabel;
+    private Label desertLabel;
+    private Label mountainLabel;
+    private Label waterLabel;
+    private Label grasslandLabel;  // Derived from remaining percentage
+    private Label biomeTotalLabel;
+    
+    // Flags to prevent recursive updates during slider balancing
+    private boolean isUpdatingTypeSliders = false;
+    private boolean isUpdatingBiomeSliders = false;
+    
     /**
-     * Creates the world settings section (placeholder for future features).
+     * Creates the world settings section with village/city controls and biome settings.
      */
     private VBox createSettingsSection() {
         VBox section = new VBox(10);
@@ -204,27 +240,359 @@ public class WorldGenMenu extends StackPane {
             "-fx-background-radius: 6;"
         );
         
-        Label header = createSectionHeader("WORLD SETTINGS");
+        Label header = createSectionHeader("SETTLEMENT SETTINGS");
         
-        Label placeholder = createLabel("Additional settings coming soon...");
-        placeholder.setStyle(placeholder.getStyle() + "-fx-font-style: italic; -fx-opacity: 0.6;");
+        // Village count slider
+        Label villageLabel = createLabel("Villages: 25");
+        villageCountSlider = new Slider(5, 50, 25);
+        villageCountSlider.setShowTickMarks(true);
+        villageCountSlider.setMajorTickUnit(15);
+        villageCountSlider.valueProperty().addListener((obs, old, newVal) -> {
+            villageLabel.setText("Villages: " + newVal.intValue());
+        });
+        styleSlider(villageCountSlider);
         
-        // Placeholder sliders for future settings
-        VBox sliders = new VBox(8);
-        sliders.setOpacity(0.5);
+        // City count slider
+        Label cityLabel = createLabel("Cities: 3");
+        cityCountSlider = new Slider(0, 10, 3);
+        cityCountSlider.setShowTickMarks(true);
+        cityCountSlider.setMajorTickUnit(5);
+        cityCountSlider.valueProperty().addListener((obs, old, newVal) -> {
+            cityLabel.setText("Cities: " + newVal.intValue());
+        });
+        styleSlider(cityCountSlider);
         
-        Label landLabel = createLabel("Land Coverage:");
-        Slider landSlider = new Slider(0.3, 0.8, 0.55);
-        landSlider.setDisable(true);
+        // Separator
+        Separator sep1 = new Separator();
+        sep1.setStyle("-fx-background-color: " + PANEL_BORDER + ";");
         
-        Label mountainLabel = createLabel("Mountain Frequency:");
-        Slider mountainSlider = new Slider(0.1, 0.8, 0.4);
-        mountainSlider.setDisable(true);
+        // Village type distribution header
+        Label typeHeader = createSectionHeader("VILLAGE TYPE DISTRIBUTION");
+        totalPercentLabel = createLabel("Total: 100%");
+        totalPercentLabel.setStyle(totalPercentLabel.getStyle() + "-fx-font-size: 11; -fx-text-fill: #66ff66;");
         
-        sliders.getChildren().addAll(landLabel, landSlider, mountainLabel, mountainSlider);
+        // Type sliders (0-100, must balance to 100%)
+        agriculturalSlider = createBalancedTypeSlider(20);
+        pastoralSlider = createBalancedTypeSlider(20);
+        lumberSlider = createBalancedTypeSlider(20);
+        miningSlider = createBalancedTypeSlider(20);
+        fishingSlider = createBalancedTypeSlider(20);
         
-        section.getChildren().addAll(header, placeholder, sliders);
+        // Separator
+        Separator sep2 = new Separator();
+        sep2.setStyle("-fx-background-color: " + PANEL_BORDER + ";");
+        
+        // Biome settings header
+        Label biomeHeader = createSectionHeader("BIOME SETTINGS (Total: 100%)");
+        biomeTotalLabel = createLabel("Total: 100%");
+        biomeTotalLabel.setStyle(biomeTotalLabel.getStyle() + "-fx-font-size: 11; -fx-text-fill: #66ff66;");
+        
+        // Biome coverage sliders (balanced to 100%)
+        // Default: Forest 20%, Desert 10%, Mountains 15%, Water 30%, Grassland 25%
+        forestCoverSlider = createBalancedBiomeSlider(20);
+        desertCoverSlider = createBalancedBiomeSlider(10);
+        mountainCoverSlider = createBalancedBiomeSlider(15);
+        waterCoverSlider = createBalancedBiomeSlider(30);
+        // Note: Grassland is calculated as 100 - (forest + desert + mountain + water)
+        
+        section.getChildren().addAll(
+            header,
+            villageLabel, villageCountSlider,
+            cityLabel, cityCountSlider,
+            sep1,
+            typeHeader, totalPercentLabel,
+            createBalancedSliderRow("🌾 Agricultural:", agriculturalSlider, () -> agriculturalLabel),
+            createBalancedSliderRow("🐄 Pastoral:", pastoralSlider, () -> pastoralLabel),
+            createBalancedSliderRow("🪓 Lumber:", lumberSlider, () -> lumberLabel),
+            createBalancedSliderRow("⛏️ Mining:", miningSlider, () -> miningLabel),
+            createBalancedSliderRow("🐟 Fishing:", fishingSlider, () -> fishingLabel),
+            sep2,
+            biomeHeader, biomeTotalLabel,
+            createBiomeSliderRow("🌲 Forest:", forestCoverSlider, () -> forestLabel),
+            createBiomeSliderRow("🏜️ Desert:", desertCoverSlider, () -> desertLabel),
+            createBiomeSliderRow("⛰️ Mountains:", mountainCoverSlider, () -> mountainLabel),
+            createBiomeSliderRow("🌊 Water:", waterCoverSlider, () -> waterLabel),
+            createGrasslandRow()
+        );
+        
         return section;
+    }
+    
+    /**
+     * Creates a slider for village type distribution (balanced to 100%).
+     */
+    private Slider createBalancedTypeSlider(int defaultValue) {
+        Slider slider = new Slider(0, 100, defaultValue);
+        slider.setShowTickMarks(true);
+        slider.setMajorTickUnit(25);
+        slider.valueProperty().addListener((obs, old, newVal) -> {
+            if (!isUpdatingTypeSliders) {
+                balanceTypeSliders(slider, old.doubleValue(), newVal.doubleValue());
+            }
+            updateTotalPercent();
+        });
+        styleSlider(slider);
+        return slider;
+    }
+    
+    /**
+     * Creates a slider for biome coverage distribution (balanced to 100%).
+     */
+    private Slider createBalancedBiomeSlider(int defaultValue) {
+        Slider slider = new Slider(0, 100, defaultValue);
+        slider.setShowTickMarks(true);
+        slider.setMajorTickUnit(25);
+        slider.valueProperty().addListener((obs, old, newVal) -> {
+            if (!isUpdatingBiomeSliders) {
+                balanceBiomeSliders(slider, old.doubleValue(), newVal.doubleValue());
+            }
+            updateBiomeTotalPercent();
+        });
+        styleSlider(slider);
+        return slider;
+    }
+    
+    /**
+     * Updates the total percentage label and color based on sum of sliders.
+     */
+    private void updateTotalPercent() {
+        int total = (int) agriculturalSlider.getValue() +
+                    (int) pastoralSlider.getValue() +
+                    (int) lumberSlider.getValue() +
+                    (int) miningSlider.getValue() +
+                    (int) fishingSlider.getValue();
+        
+        totalPercentLabel.setText("Total: " + total + "%");
+        
+        if (total == 100) {
+            totalPercentLabel.setStyle("-fx-text-fill: #66ff66; -fx-font-weight: bold;"); // Green - perfect
+        } else if (total < 100) {
+            totalPercentLabel.setStyle("-fx-text-fill: #ffaa66; -fx-font-weight: bold;"); // Orange - under
+        } else {
+            totalPercentLabel.setStyle("-fx-text-fill: #ff6666; -fx-font-weight: bold;"); // Red - over
+        }
+    }
+    
+    /**
+     * Balances village type sliders so they always total exactly 100%.
+     * When one slider changes, the others adjust proportionally.
+     * Uses integer math with remainder distribution to avoid rounding errors.
+     */
+    private void balanceTypeSliders(Slider changedSlider, double oldValue, double newValue) {
+        isUpdatingTypeSliders = true;
+        
+        Slider[] allSliders = {agriculturalSlider, pastoralSlider, lumberSlider, miningSlider, fishingSlider};
+        int changedValue = (int) Math.round(newValue);
+        int targetRemaining = 100 - changedValue; // Other sliders must sum to this
+        
+        // Calculate current total of other sliders
+        int otherTotal = 0;
+        java.util.List<Slider> otherSliders = new java.util.ArrayList<>();
+        for (Slider s : allSliders) {
+            if (s != changedSlider && s != null) {
+                otherTotal += (int) Math.round(s.getValue());
+                otherSliders.add(s);
+            }
+        }
+        
+        if (otherSliders.isEmpty()) {
+            isUpdatingTypeSliders = false;
+            return;
+        }
+        
+        // Distribute targetRemaining across other sliders proportionally
+        int[] newValues = new int[otherSliders.size()];
+        int distributed = 0;
+        
+        if (otherTotal > 0) {
+            // Distribute proportionally based on current values
+            for (int i = 0; i < otherSliders.size(); i++) {
+                double proportion = otherSliders.get(i).getValue() / otherTotal;
+                newValues[i] = (int) Math.round(targetRemaining * proportion);
+                newValues[i] = Math.max(0, Math.min(100, newValues[i])); // Clamp
+                distributed += newValues[i];
+            }
+        } else {
+            // All others are 0, distribute evenly
+            int perSlider = targetRemaining / otherSliders.size();
+            for (int i = 0; i < otherSliders.size(); i++) {
+                newValues[i] = perSlider;
+                distributed += perSlider;
+            }
+        }
+        
+        // Fix any rounding error by adjusting the largest slider
+        int remainder = targetRemaining - distributed;
+        if (remainder != 0 && !otherSliders.isEmpty()) {
+            // Find the largest slider to adjust
+            int maxIdx = 0;
+            for (int i = 1; i < newValues.length; i++) {
+                if (newValues[i] > newValues[maxIdx]) maxIdx = i;
+            }
+            newValues[maxIdx] = Math.max(0, Math.min(100, newValues[maxIdx] + remainder));
+        }
+        
+        // Apply the new values
+        for (int i = 0; i < otherSliders.size(); i++) {
+            otherSliders.get(i).setValue(newValues[i]);
+        }
+        
+        isUpdatingTypeSliders = false;
+    }
+    
+    /**
+     * Balances biome sliders so they always total 100% (with grassland as remainder).
+     */
+    private void balanceBiomeSliders(Slider changedSlider, double oldValue, double newValue) {
+        isUpdatingBiomeSliders = true;
+        
+        Slider[] allSliders = {forestCoverSlider, desertCoverSlider, mountainCoverSlider, waterCoverSlider};
+        double delta = newValue - oldValue;
+        
+        // Calculate total of other sliders
+        double otherTotal = 0;
+        int otherCount = 0;
+        for (Slider s : allSliders) {
+            if (s != changedSlider && s != null) {
+                otherTotal += s.getValue();
+                otherCount++;
+            }
+        }
+        
+        // Ensure the new value + others doesn't exceed 100 (leave room for grassland)
+        double maxForThisSlider = 100 - otherTotal;
+        if (newValue > maxForThisSlider) {
+            changedSlider.setValue(maxForThisSlider);
+        }
+        
+        isUpdatingBiomeSliders = false;
+    }
+    
+    /**
+     * Updates the biome total percentage and grassland display.
+     * Total of all 4 adjustable biomes must equal 100%.
+     */
+    private void updateBiomeTotalPercent() {
+        int forest = (int) forestCoverSlider.getValue();
+        int desert = (int) desertCoverSlider.getValue();
+        int mountain = (int) mountainCoverSlider.getValue();
+        int water = (int) waterCoverSlider.getValue();
+        int total = forest + desert + mountain + water;
+        int grassland = Math.max(0, 100 - total);
+        
+        // Update labels
+        if (biomeTotalLabel != null) {
+            biomeTotalLabel.setText("Total: " + (total + grassland) + "% (Grassland fills remaining)");
+            
+            if (total <= 100) {
+                biomeTotalLabel.setStyle("-fx-text-fill: #66ff66; -fx-font-weight: bold;"); // Green
+            } else {
+                biomeTotalLabel.setStyle("-fx-text-fill: #ff6666; -fx-font-weight: bold;"); // Red - over
+            }
+        }
+        
+        // Update grassland label
+        if (grasslandLabel != null) {
+            grasslandLabel.setText(grassland + "%");
+            if (grassland == 0) {
+                grasslandLabel.setStyle("-fx-text-fill: #ffaa66;"); // Orange warning - no grassland
+            } else {
+                grasslandLabel.setStyle("-fx-text-fill: " + ACCENT_COLOR + ";");
+            }
+        }
+    }
+    
+    /**
+     * Creates a labeled row with a biome slider showing percentage.
+     */
+    private HBox createBiomeSliderRow(String label, Slider slider, java.util.function.Supplier<Label> labelRef) {
+        HBox row = new HBox(8);
+        row.setAlignment(Pos.CENTER_LEFT);
+        
+        Label nameLabel = createLabel(label);
+        nameLabel.setMinWidth(100);
+        
+        Label valueLabel = createLabel((int)slider.getValue() + "%");
+        valueLabel.setMinWidth(40);
+        valueLabel.setStyle(valueLabel.getStyle() + "-fx-text-fill: " + ACCENT_COLOR + ";");
+        
+        // Store reference based on slider
+        if (slider == forestCoverSlider) forestLabel = valueLabel;
+        else if (slider == desertCoverSlider) desertLabel = valueLabel;
+        else if (slider == mountainCoverSlider) mountainLabel = valueLabel;
+        else if (slider == waterCoverSlider) waterLabel = valueLabel;
+        
+        slider.valueProperty().addListener((obs, old, newVal) -> {
+            valueLabel.setText(newVal.intValue() + "%");
+        });
+        
+        HBox.setHgrow(slider, Priority.ALWAYS);
+        row.getChildren().addAll(nameLabel, slider, valueLabel);
+        return row;
+    }
+    
+    /**
+     * Creates the grassland row (derived from remaining percentage).
+     */
+    private HBox createGrasslandRow() {
+        HBox row = new HBox(8);
+        row.setAlignment(Pos.CENTER_LEFT);
+        
+        Label nameLabel = createLabel("🌿 Grassland:");
+        nameLabel.setMinWidth(100);
+        
+        Label infoLabel = createLabel("(auto-calculated from remaining)");
+        infoLabel.setStyle("-fx-font-size: 10; -fx-text-fill: " + TEXT_DIM + ";");
+        
+        grasslandLabel = createLabel("25%");
+        grasslandLabel.setMinWidth(40);
+        grasslandLabel.setStyle(grasslandLabel.getStyle() + "-fx-text-fill: " + ACCENT_COLOR + ";");
+        
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        
+        row.getChildren().addAll(nameLabel, infoLabel, spacer, grasslandLabel);
+        return row;
+    }
+    
+    /**
+     * Creates a labeled row with a balanced slider showing percentage.
+     */
+    private HBox createBalancedSliderRow(String label, Slider slider, java.util.function.Supplier<Label> labelRef) {
+        HBox row = new HBox(8);
+        row.setAlignment(Pos.CENTER_LEFT);
+        
+        Label nameLabel = createLabel(label);
+        nameLabel.setMinWidth(100);
+        
+        Label valueLabel = createLabel((int)slider.getValue() + "%");
+        valueLabel.setMinWidth(40);
+        valueLabel.setStyle(valueLabel.getStyle() + "-fx-text-fill: " + ACCENT_COLOR + ";");
+        
+        // Store reference based on slider
+        if (slider == agriculturalSlider) agriculturalLabel = valueLabel;
+        else if (slider == pastoralSlider) pastoralLabel = valueLabel;
+        else if (slider == lumberSlider) lumberLabel = valueLabel;
+        else if (slider == miningSlider) miningLabel = valueLabel;
+        else if (slider == fishingSlider) fishingLabel = valueLabel;
+        
+        slider.valueProperty().addListener((obs, old, newVal) -> {
+            valueLabel.setText(newVal.intValue() + "%");
+        });
+        
+        HBox.setHgrow(slider, Priority.ALWAYS);
+        row.getChildren().addAll(nameLabel, slider, valueLabel);
+        return row;
+    }
+    
+    /**
+     * Applies consistent styling to a slider.
+     */
+    private void styleSlider(Slider slider) {
+        slider.setStyle(
+            "-fx-control-inner-background: " + DARK_BG + ";" +
+            "-fx-accent: " + ACCENT_COLOR + ";"
+        );
     }
     
     /**
@@ -317,6 +685,11 @@ public class WorldGenMenu extends StackPane {
         panel.setPadding(new Insets(20, 0, 0, 0));
         panel.setAlignment(Pos.CENTER);
         
+        // Reset button to restore all defaults
+        Button resetButton = createButton("⟳ Reset All", "Reset all sliders to default values");
+        resetButton.setStyle(resetButton.getStyle() + "-fx-padding: 15 25 15 25;");
+        resetButton.setOnAction(e -> resetAllSliders());
+        
         generateButton = new Button("⚡ GENERATE WORLD");
         generateButton.setFont(Font.font("System", FontWeight.BOLD, 18));
         generateButton.setStyle(
@@ -339,8 +712,46 @@ public class WorldGenMenu extends StackPane {
             if (onBack != null) onBack.run();
         });
         
-        panel.getChildren().addAll(backButton, generateButton);
+        panel.getChildren().addAll(backButton, resetButton, generateButton);
         return panel;
+    }
+    
+    /**
+     * Resets all sliders to their default values.
+     */
+    private void resetAllSliders() {
+        // Prevent recursive updates during reset
+        isUpdatingTypeSliders = true;
+        isUpdatingBiomeSliders = true;
+        
+        // Reset biome sliders
+        forestCoverSlider.setValue(15);
+        desertCoverSlider.setValue(10);
+        mountainCoverSlider.setValue(15);
+        waterCoverSlider.setValue(10);
+        // Grassland is calculated from remainder (50%)
+        
+        // Reset village type sliders (total 100%)
+        agriculturalSlider.setValue(40);
+        pastoralSlider.setValue(25);
+        lumberSlider.setValue(15);
+        miningSlider.setValue(10);
+        fishingSlider.setValue(10);
+        
+        // Reset count sliders
+        villageCountSlider.setValue(30);
+        cityCountSlider.setValue(5);
+        
+        // Re-enable slider updates
+        isUpdatingTypeSliders = false;
+        isUpdatingBiomeSliders = false;
+        
+        // Update all labels
+        updateTotalPercent();
+        updateBiomeTotalPercent();
+        
+        // Update preview
+        updatePreview();
     }
     
     /**
@@ -708,6 +1119,48 @@ public class WorldGenMenu extends StackPane {
                 }
             }
             
+            // Settlement settings
+            config.totalVillages = (int) villageCountSlider.getValue();
+            config.totalCities = (int) cityCountSlider.getValue();
+            
+            // Village type distribution (normalize to 100% if needed)
+            int total = (int) agriculturalSlider.getValue() +
+                        (int) pastoralSlider.getValue() +
+                        (int) lumberSlider.getValue() +
+                        (int) miningSlider.getValue() +
+                        (int) fishingSlider.getValue();
+            
+            if (total > 0) {
+                double scale = 100.0 / total;
+                config.agriculturalPercent = (int) Math.round(agriculturalSlider.getValue() * scale);
+                config.pastoralPercent = (int) Math.round(pastoralSlider.getValue() * scale);
+                config.lumberPercent = (int) Math.round(lumberSlider.getValue() * scale);
+                config.miningPercent = (int) Math.round(miningSlider.getValue() * scale);
+                config.fishingPercent = (int) Math.round(fishingSlider.getValue() * scale);
+            }
+            
+            // Biome settings (normalized to 100%)
+            int forest = (int) forestCoverSlider.getValue();
+            int desert = (int) desertCoverSlider.getValue();
+            int mountain = (int) mountainCoverSlider.getValue();
+            int water = (int) waterCoverSlider.getValue();
+            int biomeTotal = forest + desert + mountain + water;
+            
+            // If over 100%, scale down proportionally
+            if (biomeTotal > 100) {
+                double scale = 100.0 / biomeTotal;
+                forest = (int) Math.round(forest * scale);
+                desert = (int) Math.round(desert * scale);
+                mountain = (int) Math.round(mountain * scale);
+                water = (int) Math.round(water * scale);
+            }
+            
+            config.forestPercent = forest;
+            config.desertPercent = desert;
+            config.mountainPercent = mountain;
+            config.waterPercent = water;
+            // Grassland fills the remainder (100 - forest - desert - mountain - water)
+            
             onGenerateWorld.accept(config);
         }
     }
@@ -785,5 +1238,22 @@ public class WorldGenMenu extends StackPane {
         public int startX;
         public int startY;
         public String startRegionName;
+        
+        // Village/City quantity settings
+        public int totalVillages = 25;  // Default village count
+        public int totalCities = 3;     // Default city count
+        
+        // Village type distribution (percentages, should sum to 100)
+        public int agriculturalPercent = 20;
+        public int pastoralPercent = 20;
+        public int lumberPercent = 20;
+        public int miningPercent = 20;
+        public int fishingPercent = 20;
+        
+        // Biome settings (percentages)
+        public int forestPercent = 30;
+        public int desertPercent = 15;
+        public int mountainPercent = 20;
+        public int waterPercent = 45;
     }
 }

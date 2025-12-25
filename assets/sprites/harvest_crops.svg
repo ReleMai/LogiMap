@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple 4-frame sprite sheet (4 frames horizontally), 64x64 per frame -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="64" viewBox="0 0 256 64">
+  <rect width="256" height="64" fill="#1a1a1a" />
+  <!-- Frame 0 -->
+  <g transform="translate(0,0)">
+    <rect x="8" y="20" width="16" height="24" fill="#d4a574" rx="3" />
+    <path d="M30 18 q10 -8 20 0" stroke="#c0c0c0" stroke-width="3" fill="none" />
+  </g>
+  <!-- Frame 1 -->
+  <g transform="translate(64,0)">
+    <rect x="8" y="20" width="16" height="24" fill="#d4a574" rx="3" />
+    <path d="M26 20 q12 -6 26 4" stroke="#c0c0c0" stroke-width="3" fill="none" />
+  </g>
+  <!-- Frame 2 -->
+  <g transform="translate(128,0)">
+    <rect x="8" y="20" width="16" height="24" fill="#d4a574" rx="3" />
+    <path d="M22 20 q14 -4 30 8" stroke="#c0c0c0" stroke-width="3" fill="none" />
+  </g>
+  <!-- Frame 3 -->
+  <g transform="translate(192,0)">
+    <rect x="8" y="20" width="16" height="24" fill="#d4a574" rx="3" />
+    <path d="M18 24 q16 -2 34 10" stroke="#c0c0c0" stroke-width="3" fill="none" />
+  </g>
+</svg>

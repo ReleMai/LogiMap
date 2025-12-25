@@ -35,6 +35,9 @@ public class App extends Application {
         // Configure stage
         primaryStage.setTitle("LogiMap - Logistics & Supply Chain Simulator");
         primaryStage.setScene(scene);
+        primaryStage.setResizable(true);
+        primaryStage.setMinWidth(1024);
+        primaryStage.setMinHeight(768);
         primaryStage.setMaximized(true);
         primaryStage.show();
         

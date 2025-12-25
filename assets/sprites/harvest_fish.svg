@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fishing frames -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="64" viewBox="0 0 256 64">
+  <rect width="256" height="64" fill="#082028" />
+  <g transform="translate(0,0)">
+    <path d="M20 18 q14 -8 28 0" stroke="#8B5A2B" stroke-width="3" />
+    <path d="M48 28 q8 -8 16 0" stroke="#ffffff" stroke-width="3" />
+  </g>
+  <g transform="translate(64,0)">
+    <path d="M24 16 q16 -6 30 2" stroke="#8B5A2B" stroke-width="3" />
+    <path d="M54 24 q10 -6 18 2" stroke="#ffffff" stroke-width="3" />
+  </g>
+  <g transform="translate(128,0)">
+    <path d="M28 14 q18 -4 34 4" stroke="#8B5A2B" stroke-width="3" />
+    <path d="M60 22 q12 -4 20 4" stroke="#ffffff" stroke-width="3" />
+  </g>
+  <g transform="translate(192,0)">
+    <path d="M32 12 q20 -2 36 6" stroke="#8B5A2B" stroke-width="3" />
+    <path d="M66 20 q14 -2 22 6" stroke="#ffffff" stroke-width="3" />
+  </g>
+</svg>

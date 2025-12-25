@@ -32,7 +32,10 @@ public class TownInteractionMenu extends StackPane {
     private Label townNameLabel;
     private Label townTypeLabel;
     private Label populationLabel;
+    private Label treasuryLabel;
+    private Label warehouseLabel;
     private VBox optionsContainer;
+    private Button restBtn;
     
     // Callback handlers
     private Runnable onClose;
@@ -40,6 +43,7 @@ public class TownInteractionMenu extends StackPane {
     private Runnable onRest;
     private Runnable onRecruit;
     private Runnable onViewInfo;
+    private Runnable onWarehouse;
     
     // Style constants - Medieval parchment theme
     private static final String MENU_BG = "#2d2418";
@@ -94,6 +98,15 @@ public class TownInteractionMenu extends StackPane {
         
         // Town info section
         VBox infoSection = createInfoSection();
+        
+        // Treasury / storage labels (populated when showing)
+        treasuryLabel = new Label("Treasury: 0g");
+        treasuryLabel.setFont(Font.font("Arial", 12));
+        treasuryLabel.setTextFill(Color.web(TEXT_COLOR));
+        warehouseLabel = new Label("Warehouse: Not purchased");
+        warehouseLabel.setFont(Font.font("Arial", 12));
+        warehouseLabel.setTextFill(Color.web(TEXT_COLOR));
+        infoSection.getChildren().addAll(treasuryLabel, warehouseLabel);
         
         // Options section
         optionsContainer = createOptionsSection();
@@ -187,8 +200,8 @@ public class TownInteractionMenu extends StackPane {
             if (onTrade != null) onTrade.run();
         });
         
-        // Rest button
-        Button restBtn = createStyledButton("🛏 Rest at Inn (10 gold)", true);
+        // Rest button (text will be updated when showing)
+        restBtn = createStyledButton("🛏 Rest", true);
         restBtn.setOnAction(e -> {
             if (onRest != null) onRest.run();
         });
@@ -205,7 +218,13 @@ public class TownInteractionMenu extends StackPane {
             if (onViewInfo != null) onViewInfo.run();
         });
         
-        options.getChildren().addAll(title, tradeBtn, restBtn, recruitBtn, infoBtn);
+        // Warehouse button
+        Button warehouseBtn = createStyledButton("📦 Warehouse", true);
+        warehouseBtn.setOnAction(e -> {
+            if (onWarehouse != null) onWarehouse.run();
+        });
+        
+        options.getChildren().addAll(title, tradeBtn, restBtn, recruitBtn, infoBtn, warehouseBtn);
         
         return options;
     }
@@ -258,6 +277,19 @@ public class TownInteractionMenu extends StackPane {
         townNameLabel.setText(town.getName());
         townTypeLabel.setText(town.isMajor() ? "⭐ Major Town" : "Minor Settlement");
         populationLabel.setText("👥 Population: " + formatNumber((int)town.getPopulation()));
+
+        // Update rest button text based on town type
+        PlayerEnergy.RestLocation restLocation = town.getRestLocation();
+
+        // Reset economic labels until updated by caller
+        treasuryLabel.setText("Treasury: --");
+        warehouseLabel.setText("Warehouse: " + (town.getWarehouse().isPurchased() ? "Purchased" : "Not purchased"));
+        int cost = restLocation.getCost();
+        if (cost > 0) {
+            restBtn.setText("🛏 " + restLocation.getDisplayName() + " (" + cost + " gold)");
+        } else {
+            restBtn.setText("🛏 Rest at " + restLocation.getDisplayName() + " (Free)");
+        }
         
         // Show with animation
         this.setVisible(true);
@@ -312,7 +344,46 @@ public class TownInteractionMenu extends StackPane {
     public void setOnRest(Runnable handler) { this.onRest = handler; }
     public void setOnRecruit(Runnable handler) { this.onRecruit = handler; }
     public void setOnViewInfo(Runnable handler) { this.onViewInfo = handler; }
+    public void setOnWarehouse(Runnable handler) { this.onWarehouse = handler; }
     
+    // === Economic info updates ===
+    
+    public void updateEconomicInfo(SettlementPopulation pop, EconomySystem econ) {
+        if (pop != null) {
+            treasuryLabel.setText("Treasury: " + formatCurrency(pop.getGold()));
+            Town whTown = currentTown;
+            TownWarehouse wh = whTown != null ? whTown.getWarehouse() : null;
+            if (wh != null && wh.isPurchased() && wh.getStorage() != null) {
+                int used = 0;
+                Inventory inv = wh.getStorage();
+                for (int i = 0; i < inv.getSize(); i++) {
+                    if (!inv.isSlotEmpty(i)) used++;
+                }
+                warehouseLabel.setText(String.format("Warehouse: Tier %d (Used %d/%d)", wh.getTier(), used, wh.getCapacity()));
+            } else if (wh != null && !wh.isPurchased()) {
+                warehouseLabel.setText("Warehouse: Not purchased");
+            } else {
+                warehouseLabel.setText("Warehouse: Unknown");
+            }
+        } else {
+            treasuryLabel.setText("Treasury: --");
+            warehouseLabel.setText("Warehouse: --");
+        }
+    }
+
+    private String formatCurrency(int copper) {
+        if (copper >= 1000) {
+            int gold = copper / 1000;
+            int silver = (copper % 1000) / 100;
+            return String.format("%dg %ds", gold, silver);
+        } else if (copper >= 100) {
+            int silver = copper / 100;
+            return String.format("%ds", silver);
+        } else {
+            return copper + "c";
+        }
+    }
+
     // === Getters ===
     
     public Town getCurrentTown() { return currentTown; }

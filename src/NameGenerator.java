@@ -216,6 +216,18 @@ public class NameGenerator {
         "Peakview", "Summithold", "Highpass", "Stonepeak", "Cragmoor",
         "Alpinedale", "Frostpeak", "Snowcrest", "Ironvein", "Quarrytown"
     };
+
+    // Procedural flair for villages
+    private static final String[] VILLAGE_PREFIXES = {
+        "Amber", "Ashen", "Barrow", "Briar", "Cinder", "Dawn", "Duskwind", "Eagle",
+        "Frost", "Glimmer", "Hearth", "Iron", "Kings", "Lark", "Mist", "Oak",
+        "Raven", "Silver", "Star", "Stone", "Sun", "Thorn", "Wolfs", "Wyvern"
+    };
+
+    private static final String[] VILLAGE_SUFFIXES = {
+        "hollow", "reach", "haven", "hearth", "ford", "spire", "gate", "crossing",
+        "watch", "grove", "field", "meadow", "brook", "march", "fell", "harbor"
+    };
     
     /**
      * Gets a location name by index (for consistent naming).
@@ -255,10 +267,13 @@ public class NameGenerator {
                                                             boolean isForest, int x, int y, long seed) {
         int hash = Math.abs((int) ((x * 374761393L + y * 668265263L + seed) % 1000));
         
-        // 80% of the time, use generic quality names regardless of terrain
-        // This creates variety and avoids boring repetitive biome names
-        if (hash % 10 < 8) {
+        // 60% of the time, use generic quality names regardless of terrain
+        if (hash % 10 < 6) {
             return QUALITY_NAMES[hash % QUALITY_NAMES.length];
+        }
+        // 20% of the time, build a fresh prefix+suffix village name
+        if (hash % 10 < 8) {
+            return buildFlairVillageName(hash);
         }
         
         // 20% of the time, use terrain-specific if applicable
@@ -273,7 +288,16 @@ public class NameGenerator {
         }
         
         // Default to quality names
-        return QUALITY_NAMES[hash % QUALITY_NAMES.length];
+        return buildFlairVillageName(hash + 13);
+    }
+
+    /**
+     * Builds a combined prefix+suffix village name using deterministic hashing.
+     */
+    private static String buildFlairVillageName(int hash) {
+        String prefix = VILLAGE_PREFIXES[hash % VILLAGE_PREFIXES.length];
+        String suffix = VILLAGE_SUFFIXES[(hash / VILLAGE_PREFIXES.length) % VILLAGE_SUFFIXES.length];
+        return prefix + suffix;
     }
     
     /**
@@ -333,5 +357,95 @@ public class NameGenerator {
     private static String capitalize(String str) {
         if (str == null || str.isEmpty()) return str;
         return str.substring(0, 1).toUpperCase() + str.substring(1);
+    }
+    
+    // ==================== Person Names ====================
+    private static final String[] FIRST_NAMES_MALE = {
+        "Aldric", "Baldric", "Cedric", "Dunstan", "Edmund", "Fenton", "Gareth", "Harald",
+        "Ivan", "Jasper", "Kendric", "Leofric", "Magnus", "Norbert", "Osric", "Percival",
+        "Quentin", "Roland", "Sigmund", "Tormund", "Ulric", "Victor", "Wilhelm", "Xavier",
+        "Aldwin", "Bertram", "Conrad", "Derek", "Edwin", "Felix", "Godric", "Hamish",
+        "Igor", "Jarvis", "Kurt", "Lothar", "Martin", "Nigel", "Otto", "Patrick",
+        "Raymond", "Silas", "Theron", "Uther", "Vernon", "Walter", "Yorick", "Zachary"
+    };
+    
+    private static final String[] FIRST_NAMES_FEMALE = {
+        "Adelaide", "Beatrix", "Cordelia", "Dorothea", "Elspeth", "Freya", "Gwendolyn", "Helena",
+        "Isolde", "Juliana", "Katherine", "Lenora", "Matilda", "Nadia", "Ophelia", "Penelope",
+        "Quinn", "Rosalind", "Seraphina", "Theodora", "Ursula", "Vivienne", "Winifred", "Xanthe",
+        "Agnes", "Brielle", "Celeste", "Diana", "Elaine", "Flora", "Griselda", "Harriet",
+        "Ingrid", "Joanna", "Kira", "Lucinda", "Margaret", "Nina", "Olga", "Prudence",
+        "Rowena", "Sylvia", "Tabitha", "Una", "Viola", "Wilhelmina", "Yolanda", "Zelda"
+    };
+    
+    private static final String[] LAST_NAMES_COMMON = {
+        "Smith", "Miller", "Baker", "Cooper", "Fisher", "Hunter", "Mason", "Tanner",
+        "Fletcher", "Carter", "Potter", "Thatcher", "Wright", "Clark", "Walker", "Turner",
+        "Weaver", "Brewer", "Shepherd", "Wheeler", "Sawyer", "Fuller", "Chandler", "Chapman"
+    };
+    
+    private static final String[] LAST_NAMES_NOBLE = {
+        "von Blackwood", "de Montfort", "of Ironcastle", "van Ravenholm", "du Lacroix",
+        "von Goldmere", "de Silverton", "of Highcrest", "van Stormwind", "du Brightshore",
+        "Ashford", "Brightwell", "Coldstream", "Darkwater", "Eastwood", "Fairborne",
+        "Greystone", "Hawthorne", "Ironwood", "Kingsley", "Lockwood", "Northwind",
+        "Oakenshield", "Proudfoot", "Queensbury", "Ravencrest", "Stonebrook", "Thornbury"
+    };
+    
+    /**
+     * Generates a random person name.
+     * @param noble If true, uses noble last names; if false, uses common last names
+     * @return A randomly generated full name
+     */
+    public static String generateName(boolean noble) {
+        boolean isMale = random.nextBoolean();
+        String firstName = isMale 
+            ? FIRST_NAMES_MALE[random.nextInt(FIRST_NAMES_MALE.length)]
+            : FIRST_NAMES_FEMALE[random.nextInt(FIRST_NAMES_FEMALE.length)];
+        
+        String lastName = noble
+            ? LAST_NAMES_NOBLE[random.nextInt(LAST_NAMES_NOBLE.length)]
+            : LAST_NAMES_COMMON[random.nextInt(LAST_NAMES_COMMON.length)];
+        
+        return firstName + " " + lastName;
+    }
+    
+    /**
+     * Generates a random person name with seeded randomness.
+     */
+    public static String generateName(boolean noble, long seed) {
+        Random seededRandom = new Random(seed);
+        boolean isMale = seededRandom.nextBoolean();
+        String firstName = isMale 
+            ? FIRST_NAMES_MALE[seededRandom.nextInt(FIRST_NAMES_MALE.length)]
+            : FIRST_NAMES_FEMALE[seededRandom.nextInt(FIRST_NAMES_FEMALE.length)];
+        
+        String lastName = noble
+            ? LAST_NAMES_NOBLE[seededRandom.nextInt(LAST_NAMES_NOBLE.length)]
+            : LAST_NAMES_COMMON[seededRandom.nextInt(LAST_NAMES_COMMON.length)];
+        
+        return firstName + " " + lastName;
+    }
+    
+    /**
+     * Generates a random male name.
+     */
+    public static String generateMaleName(boolean noble) {
+        String firstName = FIRST_NAMES_MALE[random.nextInt(FIRST_NAMES_MALE.length)];
+        String lastName = noble
+            ? LAST_NAMES_NOBLE[random.nextInt(LAST_NAMES_NOBLE.length)]
+            : LAST_NAMES_COMMON[random.nextInt(LAST_NAMES_COMMON.length)];
+        return firstName + " " + lastName;
+    }
+    
+    /**
+     * Generates a random female name.
+     */
+    public static String generateFemaleName(boolean noble) {
+        String firstName = FIRST_NAMES_FEMALE[random.nextInt(FIRST_NAMES_FEMALE.length)];
+        String lastName = noble
+            ? LAST_NAMES_NOBLE[random.nextInt(LAST_NAMES_NOBLE.length)]
+            : LAST_NAMES_COMMON[random.nextInt(LAST_NAMES_COMMON.length)];
+        return firstName + " " + lastName;
     }
 }

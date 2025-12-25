@@ -13,7 +13,7 @@ public class ItemStack {
     
     public ItemStack(Item item, int quantity) {
         this.item = item;
-        this.quantity = Math.min(quantity, item.getMaxStackSize());
+        this.quantity = item != null ? Math.min(quantity, item.getMaxStackSize()) : 0;
     }
     
     // === Getters ===
@@ -66,7 +66,7 @@ public class ItemStack {
      */
     public boolean canMergeWith(ItemStack other) {
         if (other == null || other.isEmpty()) return false;
-        if (this.item == null) return true; // Empty slot can accept anything
+        if (this.isEmpty()) return true; // Empty slot can accept anything
         return this.item.equals(other.item) && !isFull();
     }
     

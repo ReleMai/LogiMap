@@ -121,6 +121,14 @@ public class Item {
         return category == Category.EQUIPMENT || category == Category.WEAPON;
     }
     
+    /**
+     * Creates an Equipment instance from this item if it's equippable.
+     */
+    public Equipment toEquipment() {
+        if (!isEquipment() || equipType == null) return null;
+        return new Equipment(equipType);
+    }
+    
     public boolean isStackable() {
         return maxStackSize > 1;
     }
@@ -154,50 +162,47 @@ public class Item {
     }
     
     /**
-     * Renders the specific item shape based on category.
+     * Renders the specific item shape based on category using ItemRenderer.
      */
     protected void renderItemShape(GraphicsContext gc, double x, double y, double size) {
-        gc.setFill(primaryColor);
-        
         switch (category) {
             case EQUIPMENT:
-                renderEquipmentShape(gc, x, y, size);
+                ItemRenderer.renderEquipment(gc, x, y, size, equipSlot, equipType, primaryColor, secondaryColor);
                 break;
             case WEAPON:
-                renderWeaponShape(gc, x, y, size);
+                ItemRenderer.renderWeapon(gc, x, y, size, equipType, primaryColor, secondaryColor);
                 break;
             case CONSUMABLE:
-                // Potion/food shape
-                gc.fillOval(x + size * 0.2, y + size * 0.3, size * 0.6, size * 0.6);
-                gc.fillRect(x + size * 0.35, y, size * 0.3, size * 0.35);
+                if (id != null && id.contains("potion")) {
+                    ItemRenderer.renderPotion(gc, x, y, size, primaryColor, secondaryColor);
+                } else {
+                    ItemRenderer.renderFood(gc, x, y, size, primaryColor, secondaryColor, id);
+                }
                 break;
             case MATERIAL:
-                // Crystal/material shape
-                gc.fillPolygon(
-                    new double[]{x + size * 0.5, x + size * 0.8, x + size * 0.65, x + size * 0.35, x + size * 0.2},
-                    new double[]{y, y + size * 0.4, y + size, y + size, y + size * 0.4},
-                    5
-                );
+                if (id != null && id.startsWith("grain_")) {
+                    ItemRenderer.renderGrain(gc, x, y, size, primaryColor, secondaryColor, id);
+                } else if (id != null && (id.contains("ore") || id.contains("stone"))) {
+                    ItemRenderer.renderOre(gc, x, y, size, primaryColor, secondaryColor);
+                } else if (id != null && (id.contains("wood") || id.contains("lumber"))) {
+                    ItemRenderer.renderWood(gc, x, y, size, primaryColor, secondaryColor);
+                } else if (id != null && id.contains("gem")) {
+                    ItemRenderer.renderGem(gc, x, y, size, primaryColor, secondaryColor);
+                } else {
+                    ItemRenderer.renderDefaultItem(gc, x, y, size, primaryColor);
+                }
                 break;
             case TOOL:
-                // Tool shape (hammer-like)
-                gc.setFill(secondaryColor);
-                gc.fillRect(x + size * 0.45, y + size * 0.3, size * 0.1, size * 0.65);
-                gc.setFill(primaryColor);
-                gc.fillRect(x + size * 0.2, y + size * 0.1, size * 0.6, size * 0.25);
+                String toolType = id != null && id.contains("pick") ? "pickaxe" : 
+                                  id != null && id.contains("axe") ? "axe" : "hammer";
+                ItemRenderer.renderTool(gc, x, y, size, primaryColor, secondaryColor, toolType);
                 break;
             default:
-                // Default square
-                gc.fillRoundRect(x, y, size, size, size * 0.2, size * 0.2);
+                ItemRenderer.renderDefaultItem(gc, x, y, size, primaryColor);
                 break;
         }
         
-        // Add icon symbol if present
-        if (iconSymbol != null && !iconSymbol.isEmpty()) {
-            gc.setFill(Color.WHITE);
-            gc.setFont(javafx.scene.text.Font.font("System", size * 0.5));
-            gc.fillText(iconSymbol, x + size * 0.25, y + size * 0.65);
-        }
+        // Note: iconSymbol text overlay removed since we now use proper graphical sprites via ItemRenderer
     }
     
     private void renderEquipmentShape(GraphicsContext gc, double x, double y, double size) {
@@ -254,6 +259,49 @@ public class Item {
         ); // Blade
         gc.setFill(secondaryColor);
         gc.fillRect(x + size * 0.25, y + size * 0.55, size * 0.5, size * 0.08); // Guard
+    }
+    
+    /**
+     * Renders a custom grain icon with wheat stalks.
+     */
+    private void renderGrainIcon(GraphicsContext gc, double x, double y, double size) {
+        double cx = x + size * 0.5;
+        
+        // Draw 3 wheat stalks
+        for (int i = 0; i < 3; i++) {
+            double stalkX = cx + (i - 1) * size * 0.25;
+            double stalkBaseY = y + size * 0.95;
+            double stalkTopY = y + size * 0.15;
+            
+            // Stalk
+            gc.setStroke(secondaryColor.darker());
+            gc.setLineWidth(Math.max(1.5, size * 0.06));
+            gc.strokeLine(stalkX, stalkBaseY, stalkX, stalkTopY + size * 0.25);
+            
+            // Wheat head - multiple grain kernels
+            gc.setFill(primaryColor);
+            double headY = stalkTopY;
+            double kernelW = size * 0.12;
+            double kernelH = size * 0.08;
+            
+            // Draw kernels in pairs going up
+            for (int k = 0; k < 4; k++) {
+                double ky = headY + k * kernelH * 1.3;
+                // Left kernel
+                gc.fillOval(stalkX - kernelW * 1.2, ky, kernelW, kernelH);
+                // Right kernel
+                gc.fillOval(stalkX + kernelW * 0.2, ky, kernelW, kernelH);
+            }
+            
+            // Top kernel
+            gc.fillOval(stalkX - kernelW * 0.5, headY - kernelH * 0.3, kernelW, kernelH);
+            
+            // Awns (whiskers) at top
+            gc.setStroke(primaryColor.brighter());
+            gc.setLineWidth(1);
+            gc.strokeLine(stalkX - kernelW * 0.3, headY - kernelH * 0.3, stalkX - kernelW, headY - size * 0.1);
+            gc.strokeLine(stalkX + kernelW * 0.3, headY - kernelH * 0.3, stalkX + kernelW, headY - size * 0.1);
+        }
     }
     
     /**

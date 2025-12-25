@@ -35,6 +35,11 @@ public class SettingsMenu extends StackPane {
     private Spinner<Integer> autoSaveIntervalSpinner;
     private Slider scrollSpeedSlider;
     private Slider zoomSpeedSlider;
+    private CheckBox moveToInteractCheck;
+    private CheckBox basicGraphicsCheck;
+    private CheckBox showGridCheck;
+    private CheckBox showGridNumbersCheck;
+    private CheckBox instantTownMenuCheck;
     
     public SettingsMenu() {
         this(null);
@@ -68,6 +73,11 @@ public class SettingsMenu extends StackPane {
         autoSaveIntervalSpinner.getValueFactory().setValue(settings.getAutoSaveInterval());
         scrollSpeedSlider.setValue(settings.getScrollSpeed() * 100);
         zoomSpeedSlider.setValue(settings.getZoomSpeed() * 100);
+        moveToInteractCheck.setSelected(settings.isMoveToInteract());
+        basicGraphicsCheck.setSelected(settings.isBasicGraphicsMode());
+        showGridCheck.setSelected(settings.isShowGrid());
+        showGridNumbersCheck.setSelected(settings.isShowGridNumbers());
+        instantTownMenuCheck.setSelected(settings.isInstantTownMenu());
     }
     
     private void createContent() {
@@ -98,7 +108,8 @@ public class SettingsMenu extends StackPane {
             createDisplaySection(),
             createAudioSection(),
             createGameplaySection(),
-            createControlsSection()
+            createControlsSection(),
+            createGraphicsInterfaceSection()
         );
         
         ScrollPane scrollPane = new ScrollPane(sectionsBox);
@@ -255,7 +266,54 @@ public class SettingsMenu extends StackPane {
         Label zoomValue = createValueLabel(zoomSpeedSlider, "%");
         zoomRow.getChildren().addAll(zoomLabel, zoomSpeedSlider, zoomValue);
         
-        section.getChildren().addAll(scrollRow, zoomRow);
+        // Move to Interact option
+        moveToInteractCheck = createCheckBox("Move to Interact", true);
+        Label moveToInteractHint = new Label("Right-click moves player to interactable objects");
+        moveToInteractHint.setFont(Font.font("Arial", 10));
+        moveToInteractHint.setTextFill(Color.web(TEXT_COLOR, 0.6));
+        VBox moveToInteractRow = new VBox(2);
+        moveToInteractRow.getChildren().addAll(moveToInteractCheck, moveToInteractHint);
+        
+        section.getChildren().addAll(scrollRow, zoomRow, moveToInteractRow);
+        return section;
+    }
+    
+    private VBox createGraphicsInterfaceSection() {
+        VBox section = createSection("🎨 Graphics & Interface");
+        
+        // Basic Graphics Mode
+        basicGraphicsCheck = createCheckBox("Basic Graphics Mode", false);
+        Label basicGraphicsHint = new Label("Simple textures, no decorations, no animations");
+        basicGraphicsHint.setFont(Font.font("Arial", 10));
+        basicGraphicsHint.setTextFill(Color.web(TEXT_COLOR, 0.6));
+        VBox basicGraphicsRow = new VBox(2);
+        basicGraphicsRow.getChildren().addAll(basicGraphicsCheck, basicGraphicsHint);
+        
+        // Show Grid
+        showGridCheck = createCheckBox("Show Map Grid", true);
+        Label showGridHint = new Label("Display grid lines on the map");
+        showGridHint.setFont(Font.font("Arial", 10));
+        showGridHint.setTextFill(Color.web(TEXT_COLOR, 0.6));
+        VBox showGridRow = new VBox(2);
+        showGridRow.getChildren().addAll(showGridCheck, showGridHint);
+        
+        // Show Grid Numbers (IDs)
+        showGridNumbersCheck = createCheckBox("Show Grid IDs", false);
+        Label showGridNumbersHint = new Label("Display tile numbers on the map (developer tool)");
+        showGridNumbersHint.setFont(Font.font("Arial", 10));
+        showGridNumbersHint.setTextFill(Color.web(TEXT_COLOR, 0.6));
+        VBox showGridNumbersRow = new VBox(2);
+        showGridNumbersRow.getChildren().addAll(showGridNumbersCheck, showGridNumbersHint);
+        
+        // Instant Town Menu
+        instantTownMenuCheck = createCheckBox("Instant Town Menu", false);
+        Label instantTownHint = new Label("Skip guard conversation when entering towns");
+        instantTownHint.setFont(Font.font("Arial", 10));
+        instantTownHint.setTextFill(Color.web(TEXT_COLOR, 0.6));
+        VBox instantTownRow = new VBox(2);
+        instantTownRow.getChildren().addAll(instantTownMenuCheck, instantTownHint);
+        
+        section.getChildren().addAll(basicGraphicsRow, showGridRow, showGridNumbersRow, instantTownRow);
         return section;
     }
     
@@ -385,6 +443,13 @@ public class SettingsMenu extends StackPane {
         settings.setAutoSaveInterval(autoSaveIntervalSpinner.getValue());
         settings.setScrollSpeed(scrollSpeedSlider.getValue() / 100.0);
         settings.setZoomSpeed(zoomSpeedSlider.getValue() / 100.0);
+        settings.setMoveToInteract(moveToInteractCheck.isSelected());
+        
+        // Apply new graphics/interface settings
+        settings.setBasicGraphicsMode(basicGraphicsCheck.isSelected());
+        settings.setShowGrid(showGridCheck.isSelected());
+        settings.setShowGridNumbers(showGridNumbersCheck.isSelected());
+        settings.setInstantTownMenu(instantTownMenuCheck.isSelected());
         
         // Save to file
         settings.save();

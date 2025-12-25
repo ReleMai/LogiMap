@@ -39,11 +39,24 @@ public class InteractionMenu {
     private Runnable onStandardFilter;
     private Runnable onTopoFilter;
     private Runnable onHeatmapFilter;
-    private java.util.function.Consumer<Double> onGridBrightness;
-    private Runnable onToggleGridIds;
+
     private Runnable onSaveWorld;
     private Runnable onLoadWorld;
     private Runnable onMainMenu;
+    
+    // Filter toggle buttons for visual feedback
+    private ToggleButton standardFilterBtn;
+    private ToggleButton topoFilterBtn;
+    private ToggleButton heatmapFilterBtn;
+    private ToggleGroup filterToggleGroup;
+    private VBox heatmapLegend;
+    private java.util.function.Consumer<Boolean> onHeatmapToggle;
+
+    // Dev tool handlers
+    private Runnable onDevGiveGold;
+    private Runnable onDevRefillEnergy;
+    private java.util.function.Consumer<Boolean> onTeleportToggle;
+    private CheckBox teleportCheatCheck;
     
     // Character handlers
     private Runnable onOpenCharacterSheet;
@@ -52,6 +65,7 @@ public class InteractionMenu {
     private Runnable onOpenRelationships;
     private Runnable onOpenSkills;
     private Runnable onOpenJournal;
+    private Runnable onOpenParty;
     
     // Style constants - Medieval theme
     private static final String DARK_BG = "#1f1a10";
@@ -231,28 +245,47 @@ public class InteractionMenu {
         // Filter Controls (no zoom buttons - use scroll wheel/trackpad)
         panel.getChildren().add(createSectionLabel("MAP FILTERS"));
         
-        Button standardBtn = createButton("Standard View");
-        Button topoBtn = createButton("Topographical");
-        Button heatmapBtn = createButton("Resource Heatmap");
+        // Create toggle group for exclusive filter selection
+        filterToggleGroup = new ToggleGroup();
         
-        standardBtn.setOnAction(e -> { if (onStandardFilter != null) onStandardFilter.run(); });
-        topoBtn.setOnAction(e -> { if (onTopoFilter != null) onTopoFilter.run(); });
-        heatmapBtn.setOnAction(e -> { if (onHeatmapFilter != null) onHeatmapFilter.run(); });
+        standardFilterBtn = createFilterToggle("🗺 Standard");
+        topoFilterBtn = createFilterToggle("⛰ Topographical");
+        heatmapFilterBtn = createFilterToggle("💎 Resources");
         
-        panel.getChildren().addAll(standardBtn, topoBtn, heatmapBtn);
+        standardFilterBtn.setToggleGroup(filterToggleGroup);
+        topoFilterBtn.setToggleGroup(filterToggleGroup);
+        heatmapFilterBtn.setToggleGroup(filterToggleGroup);
         
-        // Grid Controls
-        panel.getChildren().add(createSectionLabel("GRID OPTIONS"));
+        // Set Standard as default selected
+        standardFilterBtn.setSelected(true);
         
-        Button lightenBtn = createButton("Lighten Grid");
-        Button darkenBtn = createButton("Darken Grid");
-        Button toggleIdsBtn = createButton("Toggle Grid IDs");
+        standardFilterBtn.setOnAction(e -> { 
+            if (onStandardFilter != null) onStandardFilter.run();
+            updateFilterLegend("standard");
+        });
+        topoFilterBtn.setOnAction(e -> { 
+            if (onTopoFilter != null) onTopoFilter.run();
+            updateFilterLegend("topo");
+        });
+        heatmapFilterBtn.setOnAction(e -> { 
+            if (onHeatmapFilter != null) onHeatmapFilter.run();
+            updateFilterLegend("heatmap");
+        });
+
+        // Notify listeners when heatmap button is selected/deselected
+        heatmapFilterBtn.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            if (onHeatmapToggle != null) onHeatmapToggle.accept(newVal);
+        });
         
-        lightenBtn.setOnAction(e -> { if (onGridBrightness != null) onGridBrightness.accept(1.3); });
-        darkenBtn.setOnAction(e -> { if (onGridBrightness != null) onGridBrightness.accept(0.7); });
-        toggleIdsBtn.setOnAction(e -> { if (onToggleGridIds != null) onToggleGridIds.run(); });
+        panel.getChildren().addAll(standardFilterBtn, topoFilterBtn, heatmapFilterBtn);
         
-        panel.getChildren().addAll(lightenBtn, darkenBtn, toggleIdsBtn);
+        // Create heatmap legend (initially hidden)
+        heatmapLegend = createHeatmapLegend();
+        heatmapLegend.setVisible(false);
+        heatmapLegend.setManaged(false);
+        panel.getChildren().add(heatmapLegend);
+        
+
         
         // Game Controls
         panel.getChildren().add(createSectionLabel("GAME"));
@@ -293,13 +326,15 @@ public class InteractionMenu {
         // Social
         panel.getChildren().add(createSectionLabel("👥 SOCIAL"));
         
+        Button partyBtn = createButton("⚔ Party");
         Button relationshipsBtn = createButton("🤝 Relationships");
         Button reputationBtn = createButton("⭐ Reputation");
         
+        partyBtn.setOnAction(e -> { if (onOpenParty != null) onOpenParty.run(); });
         relationshipsBtn.setOnAction(e -> { if (onOpenRelationships != null) onOpenRelationships.run(); });
         reputationBtn.setOnAction(e -> { if (onOpenRelationships != null) onOpenRelationships.run(); });
         
-        panel.getChildren().addAll(relationshipsBtn, reputationBtn);
+        panel.getChildren().addAll(partyBtn, relationshipsBtn, reputationBtn);
         
         // Progression
         panel.getChildren().add(createSectionLabel("📈 PROGRESSION"));
@@ -384,6 +419,26 @@ public class InteractionMenu {
         autosaveCheck.setOnAction(e -> autosaveSlider.setDisable(!autosaveCheck.isSelected()));
         
         panel.getChildren().addAll(autosaveCheck, autosaveLabel, autosaveSlider);
+
+        // Dev tools / cheats
+        panel.getChildren().add(createSectionLabel("DEV TOOLS"));
+
+        Button devGoldBtn = createButton("💰 Add 500g");
+        devGoldBtn.setOnAction(e -> { if (onDevGiveGold != null) onDevGiveGold.run(); });
+        
+        Button devEnergyBtn = createButton("⚡ Refill Energy");
+        devEnergyBtn.setOnAction(e -> { if (onDevRefillEnergy != null) onDevRefillEnergy.run(); });
+        
+        teleportCheatCheck = new CheckBox("Ctrl+Click Teleport");
+        teleportCheatCheck.setSelected(GameSettings.getInstance().isTeleportCheatEnabled());
+        teleportCheatCheck.setStyle("-fx-text-fill: " + TEXT_COLOR + ";");
+        teleportCheatCheck.setOnAction(e -> {
+            if (onTeleportToggle != null) {
+                onTeleportToggle.accept(teleportCheatCheck.isSelected());
+            }
+        });
+        
+        panel.getChildren().addAll(devGoldBtn, devEnergyBtn, teleportCheatCheck);
         
         // Apply button
         Button applyBtn = createButton("Apply Settings");
@@ -398,6 +453,7 @@ public class InteractionMenu {
             settings.setSfxVolume((int) sfxSlider.getValue());
             settings.setAutoSave(autosaveCheck.isSelected());
             settings.setAutoSaveInterval((int) autosaveSlider.getValue());
+            settings.setTeleportCheatEnabled(teleportCheatCheck.isSelected());
             settings.save();
         });
         
@@ -503,16 +559,108 @@ public class InteractionMenu {
         return button;
     }
     
-    // ==================== Handler Setters ====================
+    /**
+     * Creates a styled toggle button for filters.
+     */
+    private ToggleButton createFilterToggle(String text) {
+        ToggleButton toggle = new ToggleButton(text);
+        toggle.setMaxWidth(Double.MAX_VALUE);
+        toggle.setAlignment(Pos.CENTER_LEFT);
+        
+        String normalStyle = String.format(
+            "-fx-background-color: %s;" +
+            "-fx-text-fill: %s;" +
+            "-fx-font-size: 11px;" +
+            "-fx-padding: 8 10 8 10;" +
+            "-fx-cursor: hand;" +
+            "-fx-background-radius: 3;" +
+            "-fx-border-radius: 3;",
+            LIGHT_BG, TEXT_COLOR
+        );
+        
+        String selectedStyle = String.format(
+            "-fx-background-color: %s;" +
+            "-fx-text-fill: white;" +
+            "-fx-font-size: 11px;" +
+            "-fx-padding: 8 10 8 10;" +
+            "-fx-cursor: hand;" +
+            "-fx-background-radius: 3;" +
+            "-fx-border-radius: 3;" +
+            "-fx-border-color: white;" +
+            "-fx-border-width: 1;",
+            ACCENT_COLOR
+        );
+        
+        toggle.setStyle(normalStyle);
+        
+        toggle.selectedProperty().addListener((obs, wasSelected, isSelected) -> {
+            toggle.setStyle(isSelected ? selectedStyle : normalStyle);
+        });
+        
+        return toggle;
+    }
     
     /**
-     * Sets handlers for grid controls.
+     * Creates a legend for the resource heatmap filter.
      */
-    public void setGridControlHandlers(java.util.function.Consumer<Double> brightnessSetter, 
-                                       Runnable toggleIds) {
-        this.onGridBrightness = brightnessSetter;
-        this.onToggleGridIds = toggleIds;
+    private VBox createHeatmapLegend() {
+        VBox legend = new VBox(3);
+        legend.setPadding(new Insets(5, 0, 5, 0));
+        legend.setStyle(
+            "-fx-background-color: " + DARK_BG + ";" +
+            "-fx-padding: 8;" +
+            "-fx-background-radius: 4;"
+        );
+        
+        Label title = new Label("Resource Legend:");
+        title.setStyle("-fx-text-fill: " + ACCENT_COLOR + "; -fx-font-size: 10px; -fx-font-weight: bold;");
+        legend.getChildren().add(title);
+        
+        // Add legend entries
+        legend.getChildren().add(createLegendEntry("💎 Ore", "#ff6a00"));
+        legend.getChildren().add(createLegendEntry("🪨 Stone", "#c0c0c0"));
+        legend.getChildren().add(createLegendEntry("💠 Gems", "#b000b0"));
+        legend.getChildren().add(createLegendEntry("🌲 Wood", "#2dbf4f"));
+        legend.getChildren().add(createLegendEntry("🌾 Fertility", "#c7f000"));
+        legend.getChildren().add(createLegendEntry("🐟 Fish", "#3ab0ff"));
+        
+        return legend;
     }
+    
+    /**
+     * Creates a single legend entry with color indicator.
+     */
+    private HBox createLegendEntry(String text, String color) {
+        HBox entry = new HBox(5);
+        entry.setAlignment(Pos.CENTER_LEFT);
+        
+        // Color indicator
+        javafx.scene.shape.Rectangle colorBox = new javafx.scene.shape.Rectangle(12, 12);
+        colorBox.setFill(javafx.scene.paint.Color.web(color));
+        colorBox.setArcWidth(2);
+        colorBox.setArcHeight(2);
+        
+        // Label
+        Label label = new Label(text);
+        label.setStyle("-fx-text-fill: " + TEXT_COLOR + "; -fx-font-size: 10px;");
+        
+        entry.getChildren().addAll(colorBox, label);
+        return entry;
+    }
+    
+    /**
+     * Updates the visibility of the filter legend based on the current filter.
+     */
+    private void updateFilterLegend(String filterType) {
+        if (heatmapLegend != null) {
+            boolean showLegend = "heatmap".equals(filterType);
+            heatmapLegend.setVisible(showLegend);
+            heatmapLegend.setManaged(showLegend);
+        }
+    }
+    
+    // ==================== Handler Setters ====================
+    
     
     /**
      * Sets handlers for filter controls.
@@ -521,6 +669,13 @@ public class InteractionMenu {
         this.onStandardFilter = standard;
         this.onTopoFilter = topo;
         this.onHeatmapFilter = heatmap;
+    }
+
+    /**
+     * Sets a handler that receives heatmap toggle state changes (selected/unselected).
+     */
+    public void setHeatmapToggleHandler(java.util.function.Consumer<Boolean> handler) {
+        this.onHeatmapToggle = handler;
     }
     
     /**
@@ -549,6 +704,31 @@ public class InteractionMenu {
         this.onOpenRelationships = relationships;
         this.onOpenSkills = skills;
         this.onOpenJournal = journal;
+    }
+    
+    /**
+     * Sets the handler for opening the party management window.
+     */
+    public void setPartyHandler(Runnable partyHandler) {
+        this.onOpenParty = partyHandler;
+    }
+
+    /**
+     * Sets handlers for dev tools (cheats).
+     */
+    public void setDevToolHandlers(Runnable giveGold, Runnable refillEnergy, java.util.function.Consumer<Boolean> teleportToggle) {
+        this.onDevGiveGold = giveGold;
+        this.onDevRefillEnergy = refillEnergy;
+        this.onTeleportToggle = teleportToggle;
+    }
+
+    /**
+     * Syncs the teleport cheat checkbox with current setting.
+     */
+    public void syncTeleportCheat(boolean enabled) {
+        if (teleportCheatCheck != null) {
+            teleportCheatCheck.setSelected(enabled);
+        }
     }
     
     /**

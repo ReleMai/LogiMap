@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pick animation frames -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="64" viewBox="0 0 256 64">
+  <rect width="256" height="64" fill="#1b1b24" />
+  <g transform="translate(0,0)">
+    <path d="M18 22 L34 36" stroke="#8B5A2B" stroke-width="4" />
+    <path d="M10 18 q12 -10 28 4" stroke="#B0B0B0" stroke-width="3" fill="none" />
+  </g>
+  <g transform="translate(64,0)">
+    <path d="M22 20 L38 34" stroke="#8B5A2B" stroke-width="4" />
+    <path d="M12 16 q14 -8 30 6" stroke="#B0B0B0" stroke-width="3" fill="none" />
+  </g>
+  <g transform="translate(128,0)">
+    <path d="M26 18 L42 32" stroke="#8B5A2B" stroke-width="4" />
+    <path d="M14 14 q16 -6 32 8" stroke="#B0B0B0" stroke-width="3" fill="none" />
+  </g>
+  <g transform="translate(192,0)">
+    <path d="M30 16 L46 30" stroke="#8B5A2B" stroke-width="4" />
+    <path d="M16 12 q18 -4 34 10" stroke="#B0B0B0" stroke-width="3" fill="none" />
+  </g>
+</svg>

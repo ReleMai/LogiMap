@@ -32,6 +32,17 @@ This release establishes the core game framework including:
 
 ## ✨ Features
 
+### New (gameplay-start branch)
+- Sprite-based harvest animations (generated sprite sheets in `assets/sprites/`).
+- NPC inventories: NPCs can carry harvested resources and display carried items.
+- UI: inspect NPC inventory and carried-item badge in NPC dialogue; hover NPCs to see inventory summary and press **I** to inspect.
+
+To regenerate placeholder sprite sheets, run:
+
+```
+java --module-path lib/javafx-sdk-23/lib --add-modules javafx.controls,javafx.fxml,javafx.graphics,javafx.swing -cp bin SpriteAssetGenerator
+```
+
 ### 🌍 World Generation
 - **Procedural Terrain**: Mountains, forests, plains, deserts, swamps, and tundra
 - **Water Systems**: Oceans, lakes, rivers, and coastal regions

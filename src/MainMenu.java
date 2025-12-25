@@ -240,7 +240,7 @@ public class MainMenu extends StackPane {
         VBox buttonSection = createButtonSection();
         
         // Version info
-        Label versionLabel = new Label("Version 1.0.0 - Alpha");
+        Label versionLabel = new Label("Version 1.1.0 - Alpha");
         versionLabel.setFont(Font.font("Arial", 11));
         versionLabel.setTextFill(Color.web(TEXT_COLOR, 0.5));
         
@@ -563,6 +563,16 @@ public class MainMenu extends StackPane {
         
         // Add update entries
         updatesContent.getChildren().addAll(
+            createUpdateEntry("Version 1.1.0 - Alpha", "January 2025", 
+                "• NPC party system improvements\n" +
+                "• Increased party formation chance (80%)\n" +
+                "• Guaranteed minimum parties per town\n" +
+                "• More dynamic NPC behavior\n" +
+                "• Faster NPC movement and animations\n" +
+                "• NPC action states (Idle, Walking, Working, etc.)\n" +
+                "• Comprehensive developer documentation\n" +
+                "• 8 detailed coding guides in docs folder"),
+            
             createUpdateEntry("Version 1.0.0 - Alpha", "December 2024", 
                 "• Main menu with animated background\n" +
                 "• World generation system\n" +

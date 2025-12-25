@@ -1,0 +1,586 @@
+import javafx.scene.paint.Color;
+
+/**
+ * Game time system managing day/night cycle, time passage, and time-based events.
+ * 
+ * Time flows constantly at: 2 real seconds = 1 game minute (configurable)
+ * A full day is 24 game hours (1440 game minutes).
+ * 
+ * Calendar starts at January 1st, 500 AD.
+ * 
+ * Sun rises in the WEST (left side of map) at 6:00
+ * Sun sets in the EAST (right side of map) at 20:00
+ */
+public class GameTime {
+    
+    // Time constants
+    public static final int MINUTES_PER_HOUR = 60;
+    public static final int HOURS_PER_DAY = 24;
+    public static final int MINUTES_PER_DAY = MINUTES_PER_HOUR * HOURS_PER_DAY; // 1440
+    public static final int DAYS_PER_MONTH = 30; // Simplified 30-day months
+    public static final int MONTHS_PER_YEAR = 12;
+    public static final int DAYS_PER_YEAR = DAYS_PER_MONTH * MONTHS_PER_YEAR; // 360
+    
+    // Month names for display
+    private static final String[] MONTH_NAMES = {
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    };
+    
+    // Time of day thresholds (in hours)
+    public static final int DAWN_START = 5;      // 5:00 AM - Dawn begins
+    public static final int SUNRISE = 6;         // 6:00 AM - Sun rises
+    public static final int MORNING = 8;         // 8:00 AM - Full daylight
+    public static final int NOON = 12;           // 12:00 PM - Midday
+    public static final int AFTERNOON = 16;      // 4:00 PM - Late afternoon
+    public static final int SUNSET = 19;         // 7:00 PM - Sunset begins
+    public static final int DUSK = 20;           // 8:00 PM - Sun sets
+    public static final int NIGHT = 21;          // 9:00 PM - Full night
+    
+    // Time flow rate: real milliseconds per game minute
+    // Default: 2000ms (2 seconds) = 1 game minute, so 48 real minutes = 1 game day
+    private double realMsPerGameMinute = 2000.0;
+    
+    // Calendar state - starting at January 1st, 500 AD
+    private int currentYear = 500;
+    private int currentMonth = 1;   // 1-12
+    private int currentDayOfMonth = 1; // 1-30
+    
+    // Current time state
+    private int currentDay = 1;       // Cumulative day counter (for internal use)
+    private int currentHour = 8;      // Start at 8:00 AM
+    private int currentMinute = 0;
+    private double minuteFraction = 0; // Accumulated sub-minute time
+    
+    // Time flow control
+    private boolean paused = false;
+    private double timeMultiplier = 1.0; // 1.0 = normal, 2.0 = double speed
+    private boolean constantFlow = true;  // Whether time flows constantly
+    
+    // Speed presets
+    public static final double SPEED_NORMAL = 1.0;
+    public static final double SPEED_FAST = 2.0;
+    public static final double SPEED_PAUSED = 0.0;
+    
+    // Cached values for rendering
+    private TimeOfDay cachedTimeOfDay = TimeOfDay.MORNING;
+    private double cachedSunPosition = 0.5; // 0 = west horizon, 0.5 = zenith, 1 = east horizon
+    private Color cachedSkyTint = Color.WHITE;
+    
+    /**
+     * Time of day periods with associated properties.
+     */
+    public enum TimeOfDay {
+        DAWN("Dawn", 5, 6, true, 0.3),
+        MORNING("Morning", 6, 12, true, 1.0),
+        AFTERNOON("Afternoon", 12, 19, true, 1.0),
+        DUSK("Dusk", 19, 21, true, 0.4),
+        NIGHT("Night", 21, 5, false, 0.1);
+        
+        private final String displayName;
+        private final int startHour;
+        private final int endHour;
+        private final boolean canFarm;
+        private final double visibility; // 0.0 to 1.0
+        
+        TimeOfDay(String displayName, int startHour, int endHour, boolean canFarm, double visibility) {
+            this.displayName = displayName;
+            this.startHour = startHour;
+            this.endHour = endHour;
+            this.canFarm = canFarm;
+            this.visibility = visibility;
+        }
+        
+        public String getDisplayName() { return displayName; }
+        public int getStartHour() { return startHour; }
+        public int getEndHour() { return endHour; }
+        public boolean canFarm() { return canFarm; }
+        public double getVisibility() { return visibility; }
+    }
+    
+    /**
+     * Creates a new game time system starting at January 1st, 500 AD, 8:00 AM.
+     */
+    public GameTime() {
+        updateCachedValues();
+    }
+    
+    /**
+     * Creates a game time system with custom starting time.
+     * @param year The year (e.g., 500 for 500 AD)
+     * @param month The month (1-12)
+     * @param dayOfMonth The day of the month (1-30)
+     * @param hour The hour (0-23)
+     * @param minute The minute (0-59)
+     */
+    public GameTime(int year, int month, int dayOfMonth, int hour, int minute) {
+        this.currentYear = year;
+        this.currentMonth = Math.max(1, Math.min(12, month));
+        this.currentDayOfMonth = Math.max(1, Math.min(30, dayOfMonth));
+        this.currentHour = hour % HOURS_PER_DAY;
+        this.currentMinute = minute % MINUTES_PER_HOUR;
+        recalculateCumulativeDay();
+        updateCachedValues();
+    }
+    
+    /**
+     * Recalculates the cumulative day counter from year/month/day.
+     */
+    private void recalculateCumulativeDay() {
+        currentDay = (currentYear - 500) * DAYS_PER_YEAR + 
+                     (currentMonth - 1) * DAYS_PER_MONTH + 
+                     currentDayOfMonth;
+    }
+    
+    // ==================== TIME ADVANCEMENT ====================
+    
+    /**
+     * Updates time based on elapsed real time (in milliseconds).
+     * Call this every frame with deltaTime.
+     */
+    public void update(double deltaMs) {
+        if (paused) return;
+        
+        // Accumulate time
+        double gameMinutesElapsed = (deltaMs / realMsPerGameMinute) * timeMultiplier;
+        minuteFraction += gameMinutesElapsed;
+        
+        // Process full minutes
+        while (minuteFraction >= 1.0) {
+            minuteFraction -= 1.0;
+            advanceMinute();
+        }
+    }
+    
+    /**
+     * Advances time by one minute.
+     */
+    private void advanceMinute() {
+        currentMinute++;
+        if (currentMinute >= MINUTES_PER_HOUR) {
+            currentMinute = 0;
+            advanceHour();
+        }
+        updateCachedValues();
+    }
+    
+    /**
+     * Advances time by one hour.
+     */
+    private void advanceHour() {
+        currentHour++;
+        if (currentHour >= HOURS_PER_DAY) {
+            currentHour = 0;
+            advanceDay();
+        }
+    }
+    
+    /**
+     * Advances the calendar by one day.
+     */
+    private void advanceDay() {
+        currentDay++;
+        currentDayOfMonth++;
+        
+        if (currentDayOfMonth > DAYS_PER_MONTH) {
+            currentDayOfMonth = 1;
+            currentMonth++;
+            
+            if (currentMonth > MONTHS_PER_YEAR) {
+                currentMonth = 1;
+                currentYear++;
+            }
+        }
+    }
+    
+    /**
+     * Advances time by a specified number of minutes.
+     * Used for waiting and action durations.
+     */
+    public void advanceTime(int minutes) {
+        for (int i = 0; i < minutes; i++) {
+            advanceMinute();
+        }
+    }
+    
+    /**
+     * Advances time by hours and minutes.
+     */
+    public void advanceTime(int hours, int minutes) {
+        advanceTime(hours * MINUTES_PER_HOUR + minutes);
+    }
+    
+    /**
+     * Waits until a specific hour of the day.
+     * Returns the number of minutes waited.
+     */
+    public int waitUntil(int targetHour) {
+        int minutesWaited = 0;
+        while (currentHour != targetHour || currentMinute != 0) {
+            advanceMinute();
+            minutesWaited++;
+            if (minutesWaited > MINUTES_PER_DAY) break; // Safety limit
+        }
+        return minutesWaited;
+    }
+    
+    /**
+     * Waits until the next occurrence of a time of day.
+     * Returns the number of minutes waited.
+     */
+    public int waitUntil(TimeOfDay targetTime) {
+        return waitUntil(targetTime.getStartHour());
+    }
+    
+    // ==================== TIME QUERIES ====================
+    
+    /**
+     * Gets the current time of day period.
+     */
+    public TimeOfDay getTimeOfDay() {
+        return cachedTimeOfDay;
+    }
+
+    /**
+     * Gets the current hour of the day (0-23).
+     */
+    public int getHourOfDay() {
+        return currentHour;
+    }
+    
+    /**
+     * Calculates and returns the current time of day.
+     */
+    private TimeOfDay calculateTimeOfDay() {
+        if (currentHour >= DAWN_START && currentHour < SUNRISE) {
+            return TimeOfDay.DAWN;
+        } else if (currentHour >= SUNRISE && currentHour < NOON) {
+            return TimeOfDay.MORNING;
+        } else if (currentHour >= NOON && currentHour < SUNSET) {
+            return TimeOfDay.AFTERNOON;
+        } else if (currentHour >= SUNSET && currentHour < NIGHT) {
+            return TimeOfDay.DUSK;
+        } else {
+            return TimeOfDay.NIGHT;
+        }
+    }
+    
+    /**
+     * Gets the sun's position in the sky.
+     * Returns 0.0 at west horizon (sunrise), 0.5 at zenith (noon), 1.0 at east horizon (sunset).
+     * Returns -1 when sun is below horizon (night).
+     */
+    public double getSunPosition() {
+        return cachedSunPosition;
+    }
+    
+    /**
+     * Calculates sun position based on current time.
+     */
+    private double calculateSunPosition() {
+        // Sun is up from SUNRISE (6:00) to DUSK (20:00) = 14 hours
+        int sunriseMinute = SUNRISE * MINUTES_PER_HOUR;
+        int sunsetMinute = DUSK * MINUTES_PER_HOUR;
+        int currentTotalMinute = currentHour * MINUTES_PER_HOUR + currentMinute;
+        
+        if (currentTotalMinute < sunriseMinute || currentTotalMinute > sunsetMinute) {
+            return -1; // Sun below horizon
+        }
+        
+        // Map time to 0-1 range (sunrise to sunset)
+        double dayProgress = (double)(currentTotalMinute - sunriseMinute) / (sunsetMinute - sunriseMinute);
+        return dayProgress;
+    }
+    
+    /**
+     * Gets the sky tint color based on time of day.
+     * Used to modify the map's appearance.
+     */
+    public Color getSkyTint() {
+        return cachedSkyTint;
+    }
+    
+    /**
+     * Calculates sky tint based on time of day.
+     */
+    private Color calculateSkyTint() {
+        double sunPos = cachedSunPosition;
+        
+        if (sunPos < 0) {
+            // Night - dark blue tint
+            return Color.rgb(40, 50, 80);
+        }
+        
+        // Day colors based on sun position
+        if (sunPos < 0.1) {
+            // Early sunrise - orange/pink
+            double t = sunPos / 0.1;
+            return Color.rgb(
+                (int)(255 * (0.8 + 0.2 * t)),
+                (int)(255 * (0.6 + 0.3 * t)),
+                (int)(255 * (0.5 + 0.4 * t))
+            );
+        } else if (sunPos < 0.2) {
+            // Late sunrise - warming up
+            double t = (sunPos - 0.1) / 0.1;
+            return Color.rgb(
+                255,
+                (int)(255 * (0.9 + 0.1 * t)),
+                (int)(255 * (0.9 + 0.1 * t))
+            );
+        } else if (sunPos < 0.8) {
+            // Midday - full daylight
+            return Color.rgb(255, 255, 255);
+        } else if (sunPos < 0.9) {
+            // Early sunset - warming
+            double t = (sunPos - 0.8) / 0.1;
+            return Color.rgb(
+                255,
+                (int)(255 * (1.0 - 0.1 * t)),
+                (int)(255 * (1.0 - 0.2 * t))
+            );
+        } else {
+            // Late sunset - orange/red
+            double t = (sunPos - 0.9) / 0.1;
+            return Color.rgb(
+                (int)(255 * (1.0 - 0.2 * t)),
+                (int)(255 * (0.9 - 0.3 * t)),
+                (int)(255 * (0.8 - 0.4 * t))
+            );
+        }
+    }
+    
+    /**
+     * Gets the ambient light level (0.0 to 1.0).
+     */
+    public double getAmbientLight() {
+        return cachedTimeOfDay.getVisibility();
+    }
+    
+    /**
+     * Checks if it's currently daytime (can perform outdoor activities).
+     */
+    public boolean isDaytime() {
+        return cachedSunPosition >= 0;
+    }
+    
+    /**
+     * Checks if farming is allowed at the current time.
+     */
+    public boolean canFarm() {
+        return cachedTimeOfDay.canFarm();
+    }
+    
+    /**
+     * Checks if it's within working hours (6 AM to 8 PM).
+     */
+    public boolean isWorkingHours() {
+        return currentHour >= SUNRISE && currentHour < DUSK;
+    }
+    
+    // ==================== TIME FORMATTING ====================
+    
+    /**
+     * Gets the formatted time string (e.g., "8:30 AM").
+     */
+    public String getFormattedTime() {
+        int displayHour = currentHour % 12;
+        if (displayHour == 0) displayHour = 12;
+        String amPm = currentHour < 12 ? "AM" : "PM";
+        return String.format("%d:%02d %s", displayHour, currentMinute, amPm);
+    }
+    
+    /**
+     * Gets the formatted date string (e.g., "January 1st, 500 AD").
+     */
+    public String getFormattedDate() {
+        String monthName = MONTH_NAMES[currentMonth - 1];
+        String daySuffix = getDaySuffix(currentDayOfMonth);
+        return String.format("%s %d%s, %d AD", monthName, currentDayOfMonth, daySuffix, currentYear);
+    }
+    
+    /**
+     * Gets a short formatted date (e.g., "Jan 1, 500").
+     */
+    public String getFormattedDateShort() {
+        String monthName = MONTH_NAMES[currentMonth - 1].substring(0, 3);
+        return String.format("%s %d, %d", monthName, currentDayOfMonth, currentYear);
+    }
+    
+    /**
+     * Gets the day suffix (st, nd, rd, th).
+     */
+    private String getDaySuffix(int day) {
+        if (day >= 11 && day <= 13) return "th";
+        switch (day % 10) {
+            case 1: return "st";
+            case 2: return "nd";
+            case 3: return "rd";
+            default: return "th";
+        }
+    }
+    
+    /**
+     * Gets the formatted time with date (e.g., "Jan 1, 500 AD - 8:30 AM").
+     */
+    public String getFormattedDateTime() {
+        return getFormattedDateShort() + " - " + getFormattedTime();
+    }
+    
+    /**
+     * Gets the formatted time of day (e.g., "Morning").
+     */
+    public String getFormattedTimeOfDay() {
+        return cachedTimeOfDay.getDisplayName();
+    }
+    
+    /**
+     * Gets the current season based on month.
+     */
+    public String getSeason() {
+        if (currentMonth >= 3 && currentMonth <= 5) return "Spring";
+        if (currentMonth >= 6 && currentMonth <= 8) return "Summer";
+        if (currentMonth >= 9 && currentMonth <= 11) return "Autumn";
+        return "Winter";
+    }
+    
+    /**
+     * Gets time remaining until a target hour.
+     */
+    public String getTimeUntil(int targetHour) {
+        int currentTotal = currentHour * 60 + currentMinute;
+        int targetTotal = targetHour * 60;
+        
+        if (targetTotal <= currentTotal) {
+            targetTotal += MINUTES_PER_DAY;
+        }
+        
+        int diff = targetTotal - currentTotal;
+        int hours = diff / 60;
+        int minutes = diff % 60;
+        
+        if (hours > 0) {
+            return hours + "h " + minutes + "m";
+        } else {
+            return minutes + "m";
+        }
+    }
+    
+    /**
+     * Gets a description of the current time speed.
+     */
+    public String getSpeedDescription() {
+        if (paused) return "Paused";
+        if (timeMultiplier >= 2.0) return "2x Speed";
+        return "Normal";
+    }
+    
+    // ==================== CACHED VALUE UPDATE ====================
+    
+    /**
+     * Updates all cached values. Called whenever time changes.
+     */
+    private void updateCachedValues() {
+        cachedTimeOfDay = calculateTimeOfDay();
+        cachedSunPosition = calculateSunPosition();
+        cachedSkyTint = calculateSkyTint();
+    }
+    
+    // ==================== CONTROL ====================
+    
+    public void pause() { paused = true; }
+    public void resume() { paused = false; }
+    public void togglePause() { paused = !paused; }
+    public boolean isPaused() { return paused; }
+    
+    /**
+     * Sets time speed to normal (1x).
+     */
+    public void setNormalSpeed() {
+        this.timeMultiplier = SPEED_NORMAL;
+        this.paused = false;
+    }
+    
+    /**
+     * Sets time speed to fast (2x).
+     */
+    public void setFastSpeed() {
+        this.timeMultiplier = SPEED_FAST;
+        this.paused = false;
+    }
+    
+    /**
+     * Toggles between normal and fast speed.
+     */
+    public void toggleSpeed() {
+        if (timeMultiplier >= SPEED_FAST) {
+            setNormalSpeed();
+        } else {
+            setFastSpeed();
+        }
+    }
+    
+    /**
+     * Checks if time is running at 2x speed.
+     */
+    public boolean isFastSpeed() {
+        return timeMultiplier >= SPEED_FAST && !paused;
+    }
+    
+    public void setTimeMultiplier(double multiplier) { 
+        this.timeMultiplier = Math.max(0.1, Math.min(10.0, multiplier)); 
+    }
+    public double getTimeMultiplier() { return timeMultiplier; }
+    
+    public void setRealMsPerGameMinute(double ms) {
+        this.realMsPerGameMinute = Math.max(100, ms);
+    }
+    
+    public void setConstantFlow(boolean enabled) {
+        this.constantFlow = enabled;
+    }
+    
+    public boolean isConstantFlow() {
+        return constantFlow;
+    }
+    
+    // ==================== GETTERS ====================
+    
+    public int getCurrentDay() { return currentDay; }
+    public int getCurrentHour() { return currentHour; }
+    public int getCurrentMinute() { return currentMinute; }
+    public int getCurrentYear() { return currentYear; }
+    public int getCurrentMonth() { return currentMonth; }
+    public int getCurrentDayOfMonth() { return currentDayOfMonth; }
+    public String getCurrentMonthName() { return MONTH_NAMES[currentMonth - 1]; }
+    
+    /**
+     * Gets total minutes since day 1, 00:00.
+     */
+    public int getTotalMinutes() {
+        return (currentDay - 1) * MINUTES_PER_DAY + currentHour * MINUTES_PER_HOUR + currentMinute;
+    }
+    
+    /**
+     * Sets the time directly. Use sparingly.
+     */
+    public void setTime(int day, int hour, int minute) {
+        this.currentDay = Math.max(1, day);
+        this.currentHour = hour % HOURS_PER_DAY;
+        this.currentMinute = minute % MINUTES_PER_HOUR;
+        updateCachedValues();
+    }
+    
+    /**
+     * Sets the full date and time.
+     */
+    public void setDateTime(int year, int month, int dayOfMonth, int hour, int minute) {
+        this.currentYear = year;
+        this.currentMonth = Math.max(1, Math.min(12, month));
+        this.currentDayOfMonth = Math.max(1, Math.min(30, dayOfMonth));
+        this.currentHour = hour % HOURS_PER_DAY;
+        this.currentMinute = minute % MINUTES_PER_HOUR;
+        recalculateCumulativeDay();
+        updateCachedValues();
+    }
+}

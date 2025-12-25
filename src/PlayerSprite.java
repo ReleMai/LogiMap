@@ -25,9 +25,13 @@ public class PlayerSprite {
     private double targetGridX;
     private double targetGridY;
     private boolean isMoving = false;
+    private boolean movementLocked = false;  // Lock movement during actions
     
     // Movement speed (grid cells per second)
     private static final double MOVE_SPEED = 8.0;
+    private static final double SHALLOW_WATER_SPEED_MULT = 0.7;  // 30% speed reduction in shallow water
+    private static final double DEEP_WATER_SPEED_MULT = 0.3;     // 70% speed reduction in deep water
+    private static final double SWIMMING_STAMINA_COST = 0.5;     // Stamina cost per second when swimming
     
     // Modular body parts
     private Map<BodyPart.Type, BodyPart> bodyParts;
@@ -51,9 +55,20 @@ public class PlayerSprite {
     // Player inventory
     private Inventory inventory;
     
+    // Player's party
+    private Party party;
+    
+    // Character stats (primary attributes and derived stats)
+    private CharacterStats characterStats;
+    
     // Animation state
     private double animationTime = 0;
     private boolean facingRight = true;
+    
+    // Swimming state
+    private boolean isSwimming = false;
+    private boolean isInShallowWater = false;
+    private TerrainType currentTerrain = null;
     
     // Visual customization
     private Color hairColor = Color.web("#4a3728");
@@ -85,6 +100,12 @@ public class PlayerSprite {
         
         // Initialize inventory (4 rows x 6 columns = 24 slots)
         this.inventory = new Inventory("Backpack", 4, 6);
+        
+        // Initialize party (starts empty)
+        this.party = new Party();
+        
+        // Initialize character stats with default values (average human stats)
+        this.characterStats = new CharacterStats();
         
         // Give player starting items (ragged clothes to equip)
         this.inventory.addItem(ItemRegistry.createStack("ragged_shirt", 1));
@@ -189,6 +210,7 @@ public class PlayerSprite {
     
     /**
      * Updates player position and body parts.
+     * @param deltaTime Time since last update in seconds
      */
     public void update(double deltaTime) {
         // Update body parts
@@ -216,6 +238,13 @@ public class PlayerSprite {
                 moveAmount *= 0.5; // 50% speed when leg is crippled
             }
             
+            // Apply water movement penalties
+            if (isSwimming) {
+                moveAmount *= DEEP_WATER_SPEED_MULT;
+            } else if (isInShallowWater) {
+                moveAmount *= SHALLOW_WATER_SPEED_MULT;
+            }
+            
             if (moveAmount >= distance) {
                 gridX = targetGridX;
                 gridY = targetGridY;
@@ -235,9 +264,58 @@ public class PlayerSprite {
     }
     
     /**
+     * Updates the terrain type the player is currently on.
+     * This affects movement speed and animation.
+     */
+    public void setCurrentTerrain(TerrainType terrain) {
+        this.currentTerrain = terrain;
+        if (terrain != null && terrain.isWater()) {
+            if (terrain.isDeepWater()) {
+                isSwimming = true;
+                isInShallowWater = false;
+            } else {
+                isSwimming = false;
+                isInShallowWater = true;
+            }
+        } else {
+            isSwimming = false;
+            isInShallowWater = false;
+        }
+    }
+    
+    /**
+     * Gets the stamina cost per second for current movement.
+     * Walking on land costs no stamina, shallow water costs none,
+     * swimming in deep water costs stamina.
+     */
+    public double getMovementStaminaCost() {
+        if (isSwimming && isMoving) {
+            return SWIMMING_STAMINA_COST;
+        }
+        return 0.0;
+    }
+    
+    /**
+     * Returns true if player is currently swimming.
+     */
+    public boolean isSwimming() {
+        return isSwimming;
+    }
+    
+    /**
+     * Returns true if player is in shallow water.
+     */
+    public boolean isInShallowWater() {
+        return isInShallowWater;
+    }
+    
+    /**
      * Sets the movement target for the player.
+     * Movement is blocked if movementLocked is true.
      */
     public void moveTo(double targetX, double targetY) {
+        if (movementLocked) return;  // Don't allow movement during actions
+        
         this.targetGridX = targetX;
         this.targetGridY = targetY;
         this.isMoving = true;
@@ -246,6 +324,27 @@ public class PlayerSprite {
         if (Math.abs(dx) > 0.1) {
             facingRight = dx > 0;
         }
+    }
+    
+    /**
+     * Locks or unlocks player movement.
+     * Used during gathering and other actions.
+     */
+    public void setMovementLocked(boolean locked) {
+        this.movementLocked = locked;
+        if (locked) {
+            // Stop any current movement
+            this.targetGridX = this.gridX;
+            this.targetGridY = this.gridY;
+            this.isMoving = false;
+        }
+    }
+    
+    /**
+     * Checks if movement is currently locked.
+     */
+    public boolean isMovementLocked() {
+        return movementLocked;
     }
     
     /**
@@ -260,127 +359,155 @@ public class PlayerSprite {
     }
     
     /**
-     * Renders a cleaner player sprite with modular body parts.
-     * Proportions: Head is larger, body is compact, limbs are simple.
+     * Renders a clean player sprite with connected body parts.
      */
     public void render(GraphicsContext gc, double screenX, double screenY, double size) {
         double centerX = screenX + size / 2;
-        double bottomY = screenY + size;
+        double bottomY = screenY + size * 0.95; // Slight offset from bottom
         
-        // Walking animation
+        // Swimming vs walking animation
         double bobOffset = 0;
         double legSwing = 0;
         double armSwing = 0;
-        if (isMoving) {
+        double swimOffset = 0;
+        
+        if (isSwimming && isMoving) {
+            // Swimming animation - horizontal stroke motion
+            bobOffset = Math.sin(animationTime * 6) * size * 0.02;
+            armSwing = Math.sin(animationTime * 6) * 30; // Wide arm strokes
+            swimOffset = -size * 0.3; // Sink lower in water
+        } else if (isInShallowWater && isMoving) {
+            // Wading animation - slower walk
+            bobOffset = Math.sin(animationTime * 6) * size * 0.01;
+            legSwing = Math.sin(animationTime * 5) * 6; // Smaller leg swing
+            armSwing = Math.sin(animationTime * 5 + Math.PI) * 4;
+        } else if (isMoving) {
+            // Normal walking animation
             bobOffset = Math.sin(animationTime * 10) * size * 0.015;
-            legSwing = Math.sin(animationTime * 8) * 15; // degrees
-            armSwing = Math.sin(animationTime * 8 + Math.PI) * 10;
+            legSwing = Math.sin(animationTime * 8) * 10;
+            armSwing = Math.sin(animationTime * 8 + Math.PI) * 8;
         }
         
         double scaleX = facingRight ? 1 : -1;
         
         gc.save();
-        gc.translate(centerX, bottomY + bobOffset);
+        gc.translate(centerX, bottomY + bobOffset + swimOffset);
         gc.scale(scaleX, 1);
         
-        // Clean sprite proportions
-        double unit = size * 0.05; // Base unit for proportions
-        
-        // Body part dimensions
-        double headRadius = unit * 4;
-        double torsoWidth = unit * 6;
-        double torsoHeight = unit * 5;
-        double armWidth = unit * 1.8;
-        double armLength = unit * 4.5;
-        double legWidth = unit * 2;
-        double legLength = unit * 5;
-        
-        // Positions (from bottom up)
-        double feetY = 0;
-        double legY = -legLength;
-        double torsoBottomY = legY;
-        double torsoTopY = torsoBottomY - torsoHeight;
-        double headY = torsoTopY - headRadius * 1.5;
-        
-        // Draw shadow
-        gc.setFill(Color.color(0, 0, 0, 0.25));
-        gc.fillOval(-unit * 3, -unit * 0.5, unit * 6, unit * 1.5);
-        
-        // === BACK LAYER ===
-        
-        // Cape
-        if (cape != null) {
-            cape.renderCape(gc, -torsoWidth / 2, torsoTopY, torsoWidth, torsoHeight + legLength * 0.8);
+        // Rotate body slightly when swimming
+        if (isSwimming) {
+            gc.rotate(15); // Tilt forward
         }
         
-        // Left arm (behind body)
+        // Unit-based proportions for a chibi-style character
+        double unit = size / 12.0;
+        
+        // Body dimensions
+        double headR = unit * 2.2;       // Head radius
+        double bodyW = unit * 3.0;       // Body width  
+        double bodyH = unit * 2.8;       // Body height
+        double legW = unit * 1.1;        // Leg width
+        double legH = unit * 2.5;        // Leg height
+        double armW = unit * 0.9;        // Arm width
+        double armH = unit * 2.2;        // Arm height
+        
+        // Y positions (from feet up)
+        double legsTop = -legH;
+        double bodyBottom = legsTop + unit * 0.3; // Overlap with legs
+        double bodyTop = bodyBottom - bodyH;
+        double headCenter = bodyTop - headR * 0.6; // Head overlaps body slightly
+        
+        // Shadow (don't show in water)
+        if (!isSwimming && !isInShallowWater) {
+            gc.setFill(Color.color(0, 0, 0, 0.25));
+            gc.fillOval(-unit * 1.5, -unit * 0.3, unit * 3, unit * 0.8);
+        }
+        
+        // === CAPE (back layer) ===
+        if (cape != null && !isSwimming) {
+            cape.renderCape(gc, -bodyW * 0.55, bodyTop, bodyW * 1.1, bodyH + legH * 0.5);
+        }
+        
+        // === LEFT ARM (behind body) ===
         gc.save();
-        gc.translate(-torsoWidth / 2 - armWidth / 2, torsoTopY + unit);
+        gc.translate(-bodyW / 2 - armW * 0.2, bodyTop + unit * 0.3);
         if (isMoving) gc.rotate(armSwing);
-        renderCleanArm(gc, bodyParts.get(BodyPart.Type.LEFT_ARM), armWidth, armLength, false);
+        renderArm(gc, bodyParts.get(BodyPart.Type.LEFT_ARM), armW, armH, false);
         gc.restore();
         
-        // === LEGS ===
+        // === LEGS === (hidden when swimming)
+        if (!isSwimming) {
+            double legGap = unit * 0.3;
+            
+            // Left leg
+            gc.save();
+            gc.translate(-legGap, legsTop);
+            if (isMoving) gc.rotate(legSwing);
+            renderLeg(gc, bodyParts.get(BodyPart.Type.LEFT_LEG), legW, legH);
+            gc.restore();
+            
+            // Right leg
+            gc.save();
+            gc.translate(legGap, legsTop);
+            if (isMoving) gc.rotate(-legSwing);
+            renderLeg(gc, bodyParts.get(BodyPart.Type.RIGHT_LEG), legW, legH);
+            gc.restore();
+        }
         
-        // Left leg
+        // === BODY ===
+        renderTorso(gc, bodyParts.get(BodyPart.Type.CHEST), -bodyW / 2, bodyTop, bodyW, bodyH);
+        
+        // === RIGHT ARM (in front) ===
         gc.save();
-        gc.translate(-legWidth * 0.6, legY);
-        if (isMoving) gc.rotate(legSwing);
-        renderCleanLeg(gc, bodyParts.get(BodyPart.Type.LEFT_LEG), legWidth, legLength);
-        gc.restore();
-        
-        // Right leg
-        gc.save();
-        gc.translate(legWidth * 0.6, legY);
-        if (isMoving) gc.rotate(-legSwing);
-        renderCleanLeg(gc, bodyParts.get(BodyPart.Type.RIGHT_LEG), legWidth, legLength);
-        gc.restore();
-        
-        // === TORSO ===
-        renderCleanTorso(gc, bodyParts.get(BodyPart.Type.CHEST), 
-                         -torsoWidth / 2, torsoTopY, torsoWidth, torsoHeight);
-        
-        // === FRONT LAYER ===
-        
-        // Right arm (in front)
-        gc.save();
-        gc.translate(torsoWidth / 2 - armWidth / 2, torsoTopY + unit);
+        gc.translate(bodyW / 2 - armW * 0.3, bodyTop + unit * 0.3);
         if (isMoving) gc.rotate(-armSwing);
-        renderCleanArm(gc, bodyParts.get(BodyPart.Type.RIGHT_ARM), armWidth, armLength, true);
+        renderArm(gc, bodyParts.get(BodyPart.Type.RIGHT_ARM), armW, armH, true);
         gc.restore();
         
         // === HEAD ===
-        renderCleanHead(gc, bodyParts.get(BodyPart.Type.HEAD), headY, headRadius);
+        renderHead(gc, bodyParts.get(BodyPart.Type.HEAD), headCenter, headR);
+        
+        // Draw water ripples when in water
+        if (isSwimming || isInShallowWater) {
+            gc.setFill(Color.color(0.3, 0.5, 0.8, 0.3));
+            double rippleSize = unit * 4;
+            gc.fillOval(-rippleSize, -unit * 0.5, rippleSize * 2, unit);
+        }
         
         gc.restore();
         
-        // Draw player name above sprite
-        gc.setFill(Color.WHITE);
-        gc.setFont(javafx.scene.text.Font.font("Arial", javafx.scene.text.FontWeight.BOLD, 
-                   Math.max(10, size * 0.14)));
-        double textWidth = name.length() * size * 0.07;
-        gc.fillText(name, screenX + size / 2 - textWidth / 2, screenY - size * 0.08);
+        // No name rendering - removed as requested
     }
     
     /**
-     * Renders a clean, rounded head
+     * Renders head with hair and face
      */
-    private void renderCleanHead(GraphicsContext gc, BodyPart head, double centerY, double radius) {
+    private void renderHead(GraphicsContext gc, BodyPart head, double centerY, double radius) {
         Color skinColor = head.getCurrentSkinColor();
         
         // Head circle
         gc.setFill(skinColor);
         gc.fillOval(-radius, centerY - radius, radius * 2, radius * 2);
         
-        // Hair (simple arc on top)
+        // Hair (covers top half)
         gc.setFill(hairColor);
-        gc.fillArc(-radius * 1.05, centerY - radius * 1.1, radius * 2.1, radius * 1.2, 
-                   0, 180, javafx.scene.shape.ArcType.CHORD);
+        gc.fillArc(-radius * 1.02, centerY - radius * 1.05, radius * 2.04, radius * 1.5, 
+                   20, 140, javafx.scene.shape.ArcType.CHORD);
         
-        // Eye (simple dot)
-        gc.setFill(Color.web("#2a2a2a"));
-        double eyeSize = radius * 0.25;
-        gc.fillOval(radius * 0.15, centerY - radius * 0.1, eyeSize, eyeSize);
+        // Eyes - two eyes
+        gc.setFill(Color.WHITE);
+        double eyeSize = radius * 0.28;
+        double eyeY = centerY - radius * 0.1;
+        // Left eye
+        gc.fillOval(-radius * 0.35, eyeY - eyeSize/2, eyeSize, eyeSize);
+        // Right eye
+        gc.fillOval(radius * 0.1, eyeY - eyeSize/2, eyeSize, eyeSize);
+        
+        // Pupils
+        gc.setFill(Color.web("#1a1a1a"));
+        double pupilSize = eyeSize * 0.5;
+        gc.fillOval(-radius * 0.28, eyeY - pupilSize/2, pupilSize, pupilSize);
+        gc.fillOval(radius * 0.17, eyeY - pupilSize/2, pupilSize, pupilSize);
         
         // Outline
         gc.setStroke(OUTLINE_COLOR);
@@ -401,22 +528,22 @@ public class PlayerSprite {
     }
     
     /**
-     * Renders a clean torso (rectangular with rounded corners)
+     * Renders torso (body armor area)
      */
-    private void renderCleanTorso(GraphicsContext gc, BodyPart chest, 
-                                   double x, double y, double w, double h) {
+    private void renderTorso(GraphicsContext gc, BodyPart chest, 
+                             double x, double y, double w, double h) {
         Color skinColor = chest.getCurrentSkinColor();
         
-        // Base torso (skin or underwear)
+        // Base torso
         gc.setFill(skinColor);
-        gc.fillRoundRect(x, y, w, h, w * 0.3, w * 0.3);
+        gc.fillRoundRect(x, y, w, h, w * 0.25, w * 0.25);
         
         // Outline
         gc.setStroke(OUTLINE_COLOR);
         gc.setLineWidth(1.5);
-        gc.strokeRoundRect(x, y, w, h, w * 0.3, w * 0.3);
+        gc.strokeRoundRect(x, y, w, h, w * 0.25, w * 0.25);
         
-        // Body armor
+        // Body armor overlay
         if (bodyArmor != null) {
             bodyArmor.renderOnBody(gc, x, y, w, h);
         }
@@ -425,79 +552,79 @@ public class PlayerSprite {
         if (chest.isHighlighted()) {
             gc.setStroke(Color.YELLOW);
             gc.setLineWidth(2);
-            gc.strokeRoundRect(x - 2, y - 2, w + 4, h + 4, w * 0.3, w * 0.3);
+            gc.strokeRoundRect(x - 2, y - 2, w + 4, h + 4, w * 0.25, w * 0.25);
         }
     }
     
     /**
-     * Renders a clean arm (simple rounded rectangle)
+     * Renders arm
      */
-    private void renderCleanArm(GraphicsContext gc, BodyPart arm, 
-                                 double width, double length, boolean isRight) {
+    private void renderArm(GraphicsContext gc, BodyPart arm, 
+                           double width, double length, boolean isRight) {
         Color skinColor = arm.getCurrentSkinColor();
         
-        // Arm
+        // Arm rectangle
         gc.setFill(skinColor);
-        gc.fillRoundRect(-width / 2, 0, width, length, width * 0.8, width * 0.8);
+        gc.fillRoundRect(-width / 2, 0, width, length, width * 0.6, width * 0.6);
         
         // Outline
         gc.setStroke(OUTLINE_COLOR);
         gc.setLineWidth(1);
-        gc.strokeRoundRect(-width / 2, 0, width, length, width * 0.8, width * 0.8);
+        gc.strokeRoundRect(-width / 2, 0, width, length, width * 0.6, width * 0.6);
         
         // Weapons
         if (isRight && mainHand != null) {
-            mainHand.renderInHand(gc, 0, length, width * 4);
+            mainHand.renderInHand(gc, 0, length, width * 3.5);
         } else if (!isRight && offHand != null) {
-            offHand.renderInHand(gc, 0, length, width * 4);
+            offHand.renderInHand(gc, 0, length, width * 3.5);
         }
         
         // Highlight
         if (arm.isHighlighted()) {
             gc.setStroke(Color.YELLOW);
             gc.setLineWidth(2);
-            gc.strokeRoundRect(-width / 2 - 1, -1, width + 2, length + 2, width * 0.8, width * 0.8);
+            gc.strokeRoundRect(-width / 2 - 1, -1, width + 2, length + 2, width * 0.6, width * 0.6);
         }
     }
     
     /**
-     * Renders a clean leg with underwear shorts
+     * Renders leg with underwear shorts and footwear
      */
-    private void renderCleanLeg(GraphicsContext gc, BodyPart leg, double width, double length) {
+    private void renderLeg(GraphicsContext gc, BodyPart leg, double width, double length) {
         Color skinColor = leg.getCurrentSkinColor();
         
-        // Upper leg (underwear - white shorts)
-        double shortsLength = length * 0.35;
+        // Upper portion (underwear shorts)
+        double shortsLen = length * 0.35;
         gc.setFill(BodyPart.getUnderwearColor());
-        gc.fillRoundRect(-width / 2, 0, width, shortsLength, width * 0.5, width * 0.5);
+        gc.fillRoundRect(-width / 2, 0, width, shortsLen, width * 0.4, width * 0.4);
         
         // Lower leg (skin)
         gc.setFill(skinColor);
-        gc.fillRoundRect(-width / 2, shortsLength - width * 0.2, width, length - shortsLength + width * 0.2, 
-                         width * 0.5, width * 0.5);
+        gc.fillRoundRect(-width / 2, shortsLen - width * 0.15, width, length - shortsLen + width * 0.15, 
+                         width * 0.4, width * 0.4);
         
         // Outlines
         gc.setStroke(OUTLINE_COLOR);
         gc.setLineWidth(1);
-        gc.strokeRoundRect(-width / 2, 0, width, shortsLength, width * 0.5, width * 0.5);
-        gc.strokeRoundRect(-width / 2, shortsLength - width * 0.2, width, length - shortsLength + width * 0.2, 
-                          width * 0.5, width * 0.5);
+        gc.strokeRoundRect(-width / 2, 0, width, shortsLen, width * 0.4, width * 0.4);
+        gc.strokeRoundRect(-width / 2, shortsLen - width * 0.15, width, length - shortsLen + width * 0.15, 
+                          width * 0.4, width * 0.4);
         
-        // Leg armor
+        // Leg armor overlay
         if (legArmor != null) {
             legArmor.renderOnLegs(gc, -width / 2, 0, width, length);
         }
         
         // Footwear
         if (footwear != null) {
-            footwear.renderOnFeet(gc, -width / 2, length - width * 0.4, width, width * 0.6);
+            footwear.renderOnFeet(gc, -width / 2, length - width * 0.35, width, width * 0.5);
         }
         
         // Highlight
         if (leg.isHighlighted()) {
             gc.setStroke(Color.YELLOW);
             gc.setLineWidth(2);
-            gc.strokeRoundRect(-width / 2 - 1, -1, width + 2, length + 2, width * 0.5, width * 0.5);
+            gc.strokeRoundRect(-width / 2 - 1, -1, width + 2, length + 2, width * 0.4, width * 0.4);
         }
     }
     
@@ -631,6 +758,8 @@ public class PlayerSprite {
     public void addGold(int amount) { this.gold += amount; }
     public Currency getCurrency() { return currency; }
     public Inventory getInventory() { return inventory; }
+    public Party getParty() { return party; }
+    public CharacterStats getCharacterStats() { return characterStats; }
     public boolean isFacingRight() { return facingRight; }
     public void setFacingRight(boolean facingRight) { this.facingRight = facingRight; }
     public Map<BodyPart.Type, BodyPart> getAllBodyParts() { return bodyParts; }

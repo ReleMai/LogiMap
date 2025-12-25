@@ -1,3 +1,5 @@
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 
 /**
@@ -18,6 +20,10 @@ public class TerrainGenerator {
     private WaterType[][] waterType;
     private double[][] waterDepth;
     private boolean[][] snow;
+    
+    // Decorations and resource nodes (set from WorldGenerator)
+    private List<TerrainDecoration> decorations = new ArrayList<>();
+    private List<ResourceNode> resourceNodes = new ArrayList<>();
     
     // Generation parameters
     private final Random random;
@@ -381,6 +387,22 @@ public class TerrainGenerator {
     
     public boolean isSnow(int x, int y) {
         return isValidPosition(x, y) && snow[x][y];
+    }
+    
+    public List<TerrainDecoration> getDecorations() {
+        return decorations;
+    }
+    
+    public void setDecorations(List<TerrainDecoration> decorations) {
+        this.decorations = decorations != null ? decorations : new ArrayList<>();
+    }
+    
+    public List<ResourceNode> getResourceNodes() {
+        return resourceNodes;
+    }
+    
+    public void setResourceNodes(List<ResourceNode> nodes) {
+        this.resourceNodes = nodes != null ? nodes : new ArrayList<>();
     }
     
     public int getWidth() {
